@@ -28,7 +28,9 @@ import {
   MoreVertical,
   Download,
   FileText,
-  AlertTriangle
+  AlertTriangle,
+  Calculator,
+  Box
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -92,23 +94,23 @@ const getTransitMetrics = (shipment: Shipment) => {
 
   // 1. Current Transit Days
   let lastCompletedDate = departureDate;
-  shipment.checkpoints.forEach(cp => {
+  (shipment.checkpoints || []).forEach(cp => {
     if (cp.actualDate) {
       const d = new Date(cp.actualDate);
       if (d > lastCompletedDate) lastCompletedDate = d;
     }
   });
 
-  const isCompleted = shipment.checkpoints.every(cp => cp.status === 'completed');
+  const isCompleted = (shipment.checkpoints || []).every(cp => cp.status === 'completed');
   const referenceDate = isCompleted ? lastCompletedDate : today;
   const currentTransitTime = Math.max(0, Math.ceil((referenceDate.getTime() - departureDate.getTime()) / (24 * 60 * 60 * 1000)));
 
   // 2. Delay Days Calculation
   let totalDelayDays = 0;
-  shipment.checkpoints.forEach(cp => {
+  (shipment.checkpoints || []).forEach(cp => {
     if (cp.actualDate && cp.plannedDate) {
       const diff = Math.ceil((new Date(cp.actualDate).getTime() - new Date(cp.plannedDate).getTime()) / (24 * 60 * 60 * 1000));
-      if (diff > 0) totalDelayDays = Math.max(totalDelayDays, diff); // Use the max delay encountered so far as the current drift
+      if (diff > 0) totalDelayDays = Math.max(totalDelayDays, diff);
     } else if (!cp.actualDate && cp.plannedDate) {
       const overdue = Math.ceil((today.getTime() - new Date(cp.plannedDate).getTime()) / (24 * 60 * 60 * 1000));
       if (overdue > 0) totalDelayDays = Math.max(totalDelayDays, overdue);
@@ -116,8 +118,9 @@ const getTransitMetrics = (shipment: Shipment) => {
   });
 
   // 3. Estimated Arrival
-  const finalCheckpoint = shipment.checkpoints[shipment.checkpoints.length - 1];
-  const originalArrival = new Date(finalCheckpoint.plannedDate || shipment.departureDate);
+  const checkpoints = shipment.checkpoints || [];
+  const finalCheckpoint = checkpoints.length > 0 ? checkpoints[checkpoints.length - 1] : null;
+  const originalArrival = new Date(finalCheckpoint?.plannedDate || shipment.departureDate);
   const estimatedArrivalDate = new Date(originalArrival.getTime() + totalDelayDays * 24 * 60 * 60 * 1000);
 
   return {
@@ -296,25 +299,223 @@ const Header = ({ activeTab, onTabChange }: { activeTab: string; onTabChange: (t
   </header>
 );
 
-const Dashboard = ({ shipments, onSelectShipment, onCreateNew }: {
+const MainPanel = ({ onNavigate }: { onNavigate: (view: any) => void }) => {
+  const modules = [
+    { id: 'dashboard', title: 'Shipments', desc: 'Real-time tracking & delay alerts', icon: Truck, color: 'bg-blue-600', status: 'Active' },
+    { id: 'freight-calc', title: 'FreightCalc', desc: 'Simulator & performance ranking', icon: Calculator, color: 'bg-emerald-600', status: 'Beta' },
+    { id: 'cargo-fit', title: 'CargoFit', desc: 'Trailer occupation & optimization', icon: Box, color: 'bg-amber-600', status: 'New' },
+    { id: 'reports', title: 'Reports & BI', desc: 'BI & performance analytics', icon: BarChart3, color: 'bg-purple-600', status: 'Premium' },
+    { id: 'fork-manager', title: 'ForkManager', desc: 'Fleet maintenance & OS control', icon: Zap, color: 'bg-orange-600', status: 'New' }
+  ];
+
+  return (
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+      <div className="mb-12">
+        <h1 className="text-4xl font-extrabold text-slate-900 tracking-tight">CargoTrack <span className="text-blue-600">Pro</span></h1>
+        <p className="text-slate-500 mt-3 text-lg">Integrated Logistics Suite for Modern Supply Chain Management.</p>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+        {modules.map((m) => (
+          <motion.div
+            key={m.id}
+            whileHover={{ y: -5, scale: 1.02 }}
+            onClick={() => onNavigate(m.id)}
+            className="bg-white rounded-3xl p-8 border border-slate-200 shadow-sm hover:shadow-xl transition-all cursor-pointer relative overflow-hidden group"
+          >
+            <div className={`w-16 h-16 ${m.color} rounded-2xl flex items-center justify-center mb-6 shadow-lg group-hover:rotate-6 transition-transform`}>
+              <m.icon className="w-8 h-8 text-white" />
+            </div>
+            <div className="absolute top-6 right-6">
+              <span className={`px-2 py-1 rounded-full text-[9px] font-bold uppercase tracking-widest ${m.status === 'Active' ? 'bg-blue-50 text-blue-600' :
+                m.status === 'Beta' ? 'bg-emerald-50 text-emerald-600' :
+                  'bg-amber-50 text-amber-600'
+                }`}>
+                {m.status}
+              </span>
+            </div>
+            <h3 className="text-xl font-bold text-slate-900 mb-2">{m.title}</h3>
+            <p className="text-slate-500 text-sm leading-relaxed">{m.desc}</p>
+            <div className="mt-8 flex items-center text-blue-600 text-sm font-bold gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+              Access Module <ChevronRight className="w-4 h-4" />
+            </div>
+          </motion.div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+const FreightCalc = ({ onBack }: { onBack: () => void }) => (
+  <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+    <div className="flex items-center justify-between mb-8">
+      <div className="flex items-center gap-4">
+        <button onClick={onBack} className="p-2 hover:bg-slate-100 rounded-full transition-colors"><ArrowLeft className="w-5 h-5 text-slate-600" /></button>
+        <div>
+          <h1 className="text-2xl font-bold text-slate-900">FreightCalc Simulator</h1>
+          <p className="text-sm text-slate-500">Comparative quotation and performance engine</p>
+        </div>
+      </div>
+      <button className="px-6 py-2 bg-blue-600 text-white rounded-xl font-bold text-sm shadow-lg shadow-blue-100">+ New Simulation</button>
+    </div>
+
+    <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+      <div className="lg:col-span-2 space-y-6">
+        <div className="bg-white rounded-3xl p-8 border border-slate-200 shadow-sm">
+          <h3 className="font-bold text-slate-900 mb-6">Recent Quotations</h3>
+          <div className="space-y-4">
+            {[1, 2, 3].map(i => (
+              <div key={i} className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100 group hover:border-blue-200 transition-all cursor-pointer">
+                <div className="flex items-center gap-4">
+                  <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-sm"><Calculator className="w-5 h-5 text-blue-600" /></div>
+                  <div>
+                    <p className="text-sm font-bold text-slate-900">Route MAO-SP · 12.5 tons</p>
+                    <p className="text-[10px] font-bold text-slate-400 uppercase">Simulated 2h ago</p>
+                  </div>
+                </div>
+                <div className="text-right">
+                  <p className="text-sm font-bold text-blue-600">R$ 4.250,00</p>
+                  <p className="text-[10px] text-emerald-600 font-bold uppercase">Best Value</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+      <div className="space-y-6">
+        <div className="bg-slate-900 rounded-3xl p-8 text-white relative overflow-hidden">
+          <div className="relative z-10">
+            <BarChart3 className="w-8 h-8 text-blue-400 mb-4" />
+            <h3 className="font-bold text-lg mb-2">Carrier Performance</h3>
+            <p className="text-slate-400 text-xs leading-relaxed">Ranking based on lead-time adherence and historical cost adherence.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+);
+
+const CargoFit = ({ onBack }: { onBack: () => void }) => (
+  <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+    <div className="flex items-center justify-between mb-8">
+      <div className="flex items-center gap-4">
+        <button onClick={onBack} className="p-2 hover:bg-slate-100 rounded-full transition-colors"><ArrowLeft className="w-5 h-5 text-slate-600" /></button>
+        <div>
+          <h1 className="text-2xl font-bold text-slate-900">CargoFit 3D</h1>
+          <p className="text-sm text-slate-500">Trailer occupation & load optimization</p>
+        </div>
+      </div>
+    </div>
+
+    <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
+      <div className="bg-white rounded-3xl p-6 border border-slate-200 shadow-sm">
+        <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-6">Material Library</h3>
+        <div className="space-y-3">
+          {['Box A-101', 'Pallet Std', 'Crate XL'].map(m => (
+            <div key={m} className="p-3 bg-slate-50 rounded-xl border border-slate-100 text-xs font-bold text-slate-700 flex justify-between items-center">
+              <span>{m}</span>
+              <span className="text-slate-400">120x80x100</span>
+            </div>
+          ))}
+        </div>
+      </div>
+      <div className="md:col-span-3 bg-slate-50 rounded-3xl border-2 border-dashed border-slate-200 flex flex-col items-center justify-center p-20 text-center">
+        <div className="w-full max-w-md bg-white h-32 rounded-xl flex items-center justify-center border border-slate-200 shadow-sm relative overflow-hidden mb-8">
+          <div className="absolute inset-0 opacity-5 bg-[linear-gradient(45deg,#000_25%,transparent_25%,transparent_50%,#000_50%,#000_75%,transparent_75%,transparent)] bg-[length:20px_20px]" />
+          <p className="text-slate-300 font-bold uppercase tracking-tighter text-4xl italic">3D SIMULATOR</p>
+        </div>
+        <p className="text-slate-500 font-medium">Select materials to begin occupation simulation.</p>
+        <div className="mt-8 flex gap-4">
+          <div className="px-4 py-2 bg-white rounded-full border border-slate-200 text-xs font-bold text-slate-600 shadow-sm">Occupancy: 0%</div>
+          <div className="px-4 py-2 bg-white rounded-full border border-slate-200 text-xs font-bold text-slate-600 shadow-sm">Center of Gravity: --</div>
+        </div>
+      </div>
+    </div>
+  </div>
+);
+
+const ForkManager = ({ onBack }: { onBack: () => void }) => (
+  <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+    <div className="flex items-center justify-between mb-8">
+      <div className="flex items-center gap-4">
+        <button onClick={onBack} className="p-2 hover:bg-slate-100 rounded-full transition-colors"><ArrowLeft className="w-5 h-5 text-slate-600" /></button>
+        <div>
+          <h1 className="text-2xl font-bold text-slate-900">ForkManager</h1>
+          <p className="text-sm text-slate-500">Fleet maintenance & asset control</p>
+        </div>
+      </div>
+      <button className="px-6 py-2 bg-orange-600 text-white rounded-xl font-bold text-sm shadow-lg shadow-orange-100">Open Work Order</button>
+    </div>
+
+    <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
+      <div className="lg:col-span-3 space-y-8">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {[
+            { id: 'FL-001', model: 'Toyota 8FG', hours: '1.240h', status: 'Maintenance' },
+            { id: 'FL-002', model: 'Hyster H50', hours: '890h', status: 'Active' },
+            { id: 'FL-003', model: 'Linde E20', hours: '3.120h', status: 'Critical' }
+          ].map(f => (
+            <div key={f.id} className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm group">
+              <div className="flex justify-between items-start mb-4">
+                <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${f.status === 'Active' ? 'bg-emerald-50 text-emerald-600' :
+                  f.status === 'Critical' ? 'bg-red-50 text-red-600' : 'bg-orange-50 text-orange-600'
+                  }`}>
+                  <Zap className="w-5 h-5" />
+                </div>
+                <span className={`text-[9px] font-bold uppercase py-1 px-2 rounded-full ${f.status === 'Active' ? 'bg-emerald-50 text-emerald-600' :
+                  f.status === 'Critical' ? 'bg-red-50 text-red-600' : 'bg-orange-50 text-orange-600'
+                  }`}>{f.status}</span>
+              </div>
+              <h3 className="font-bold text-slate-900">{f.id}</h3>
+              <p className="text-xs text-slate-500 mb-4">{f.model}</p>
+              <div className="flex items-center justify-between pt-4 border-t border-slate-50">
+                <span className="text-xs text-slate-400 font-medium">Hours: {f.hours}</span>
+                <ChevronRight className="w-4 h-4 text-slate-300 group-hover:text-orange-600 transition-colors" />
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+      <div className="bg-white rounded-3xl border border-slate-200 p-8 shadow-sm">
+        <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-6">Preventive Alerts</h3>
+        <div className="space-y-4">
+          <div className="p-4 bg-orange-50 border border-orange-100 rounded-2xl">
+            <p className="text-xs font-bold text-orange-900">FL-001: Next Service in 12h</p>
+            <p className="text-[10px] text-orange-700 mt-1">Plan: Engine Oil & Filters</p>
+          </div>
+          <div className="p-4 bg-red-50 border border-red-100 rounded-2xl animate-pulse">
+            <p className="text-xs font-bold text-red-900">FL-003: OVERDUE</p>
+            <p className="text-[10px] text-red-700 mt-1">Hydraulic system inspection required.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+);
+
+const Dashboard = ({ shipments, onSelectShipment, onCreateNew, onBack }: {
   shipments: Shipment[];
   onSelectShipment: (s: Shipment) => void;
   onCreateNew: () => void;
+  onBack: () => void;
 }) => (
   <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-    <div className="flex justify-between items-end mb-8">
+    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-end gap-4 mb-8">
       <div>
-        <h1 className="text-3xl font-bold text-slate-900">Active Shipments</h1>
-        <p className="text-slate-500 mt-1">Monitoring {shipments.length} active logistics routes for Manaus-Southeast corridors.</p>
+        <div className="flex items-center gap-2 mb-2">
+          <button onClick={onBack} className="text-xs font-bold text-blue-600 hover:underline">← App Selector</button>
+        </div>
+        <h1 className="text-2xl sm:text-3xl font-bold text-slate-900">Active Shipments</h1>
+        <p className="text-sm text-slate-500 mt-1">Monitoring {shipments.length} routes.</p>
       </div>
-      <div className="flex gap-3">
-        <button className="flex items-center gap-2 px-4 py-2 border border-slate-200 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-50 transition-colors">
+      <div className="flex w-full sm:w-auto gap-3">
+        <button className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 py-2 border border-slate-200 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-50 transition-colors">
           <Filter className="w-4 h-4" />
           Filter
         </button>
         <button
           onClick={onCreateNew}
-          className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors shadow-sm"
+          className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors shadow-sm"
         >
           <Plus className="w-4 h-4" />
           New Shipment
@@ -367,15 +568,15 @@ const Dashboard = ({ shipments, onSelectShipment, onCreateNew }: {
                   {/* Progress Line Background */}
                   <div className="absolute left-[20px] right-[20px] h-1 bg-slate-100 top-1/2 -translate-y-1/2 -z-10 rounded-full" />
 
-                  {shipment.checkpoints.map((cp, idx) => {
+                  {(shipment.checkpoints || []).map((cp, idx) => {
                     const isOverdue = isCheckpointDelayed(cp);
                     return (
                       <div key={cp.id} className="flex flex-col items-center gap-2 relative">
-                        <div className={`w-4 h-4 rounded-full border-3 border-white shadow-md transition-all ${cp.status === 'completed' ? 'bg-emerald-500' :
+                        <div className={`w-3 h-3 lg:w-4 lg:h-4 rounded-full border-2 lg:border-3 border-white shadow-md transition-all ${cp.status === 'completed' ? 'bg-emerald-500' :
                           isOverdue ? 'bg-red-500 animate-pulse ring-4 ring-red-100' :
                             cp.status === 'current' ? 'bg-blue-600 ring-2 ring-blue-100' : 'bg-slate-200'
                           }`} />
-                        <span className={`text-[10px] font-bold uppercase tracking-tighter absolute -bottom-6 whitespace-nowrap ${isOverdue ? 'text-red-600 font-extrabold' :
+                        <span className={`text-[8px] lg:text-[10px] font-bold uppercase tracking-tighter absolute -bottom-6 whitespace-nowrap hidden lg:block ${isOverdue ? 'text-red-600 font-extrabold' :
                           cp.status === 'pending' ? 'text-slate-400' : 'text-slate-600'
                           }`}>
                           {cp.label}
@@ -893,14 +1094,14 @@ const ShipmentDetail = ({
             )}
           </div>
         </div>
-        <div className="ml-auto flex gap-3">
-          <button className="flex items-center gap-2 px-4 py-2 border border-slate-200 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-50">
+        <div className="ml-auto flex flex-col sm:flex-row gap-3 w-full sm:w-auto mt-4 sm:mt-0">
+          <button className="flex items-center justify-center gap-2 px-4 py-3 sm:py-2 border border-slate-200 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-50">
             <Download className="w-4 h-4" />
             Download All Docs
           </button>
           <button
             onClick={onUpdateStatus}
-            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 shadow-sm"
+            className="flex items-center justify-center gap-2 px-4 py-3 sm:py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 shadow-sm"
           >
             Update Status
           </button>
@@ -1207,8 +1408,8 @@ const StatusUpdateModal = ({
 // --- Main App ---
 
 export default function App() {
-  const [view, setView] = useState<'dashboard' | 'create' | 'detail'>('dashboard');
-  const [activeTab, setActiveTab] = useState('dashboard');
+  const [view, setView] = useState<'home' | 'dashboard' | 'create' | 'detail' | 'freight-calc' | 'cargo-fit' | 'reports' | 'fork-manager'>('home');
+  const [activeTab, setActiveTab] = useState('home');
   const [shipments, setShipments] = useState<Shipment[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedShipment, setSelectedShipment] = useState<Shipment | null>(null);
@@ -1339,9 +1540,8 @@ export default function App() {
 
   const handleTabChange = (tab: string) => {
     setActiveTab(tab);
-    if (tab === 'dashboard' || tab === 'shipments') {
-      setView('dashboard');
-    }
+    if (tab === 'home') setView('home');
+    if (tab === 'dashboard' || tab === 'shipments') setView('dashboard');
   };
 
   return (
@@ -1350,6 +1550,18 @@ export default function App() {
 
       <main>
         <AnimatePresence mode="wait">
+          {view === 'home' && (
+            <motion.div
+              key="home"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              transition={{ duration: 0.2 }}
+            >
+              <MainPanel onNavigate={(v) => { setView(v); setActiveTab(v === 'dashboard' ? 'dashboard' : 'home'); }} />
+            </motion.div>
+          )}
+
           {view === 'dashboard' && (
             <motion.div
               key="dashboard"
@@ -1370,6 +1582,7 @@ export default function App() {
                   shipments={shipments}
                   onSelectShipment={handleSelectShipment}
                   onCreateNew={handleCreateNew}
+                  onBack={() => setView('home')}
                 />
               )}
             </motion.div>
@@ -1403,6 +1616,24 @@ export default function App() {
                 onBack={() => setView('dashboard')}
                 onUpdateStatus={() => setShowStatusModal(true)}
               />
+            </motion.div>
+          )}
+
+          {view === 'freight-calc' && (
+            <motion.div key="freight" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+              <FreightCalc onBack={() => setView('home')} />
+            </motion.div>
+          )}
+
+          {view === 'cargo-fit' && (
+            <motion.div key="cargofit" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+              <CargoFit onBack={() => setView('home')} />
+            </motion.div>
+          )}
+
+          {view === 'fork-manager' && (
+            <motion.div key="fork" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+              <ForkManager onBack={() => setView('home')} />
             </motion.div>
           )}
         </AnimatePresence>
