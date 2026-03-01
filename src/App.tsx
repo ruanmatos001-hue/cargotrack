@@ -30,7 +30,17 @@ import {
   FileText,
   AlertTriangle,
   Calculator,
-  Box
+  Box,
+  CreditCard,
+  ScrollText,
+  ShieldCheck,
+  Users,
+  Lock,
+  LogOut,
+  Mail,
+  Key,
+  Trash2,
+  Calendar
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -43,12 +53,28 @@ interface Checkpoint {
   id: string;
   label: string;
   status: 'pending' | 'completed' | 'current';
-  timestamp?: string; // Actual time
+  timestamp?: string;
   location?: string;
   details?: string;
   plannedDate?: string;
   actualDate?: string;
-  duration?: number; // Days
+  duration?: number;
+}
+
+type UserRole = 'super-admin' | 'company-admin' | 'analyst' | 'user';
+type PermissionType = 'view' | 'edit';
+
+interface Profile {
+  id: string;
+  email: string;
+  role: UserRole;
+  company_id?: string;
+  company_name?: string;
+}
+
+interface ModuleAccess {
+  module_id: string;
+  permission_type: PermissionType;
 }
 
 interface Shipment {
@@ -73,6 +99,20 @@ interface Shipment {
   invoices: { nf: string; value: string }[];
   invoiceFileUrl?: string;
   invoiceFileName?: string;
+}
+
+interface Payment {
+  id: string;
+  company_id: string;
+  type: 'monthly' | 'extra';
+  document_type: 'NF' | 'ND';
+  document_number?: string;
+  amount: number;
+  description: string;
+  due_date: string;
+  status: 'pending' | 'paid' | 'overdue';
+  paid_at?: string;
+  created_at: string;
 }
 
 // --- Constants ---
@@ -163,135 +203,55 @@ const MODAL_CONFIGS: Record<TransportMode, { checkpoints: { label: string; durat
   }
 };
 
-const INITIAL_SHIPMENTS: Shipment[] = [
-  {
-    id: '1',
-    code: 'OKA-2026-0142',
-    mode: 'Maritime',
-    origin: 'Manaus (MAO)',
-    destination: 'Extrema (MG)',
-    status: 'delayed',
-    leadTime: 21,
-    currentTransitTime: 18,
-    departureDate: '2026-02-07',
-    carrier: 'Aliança Arpoador - Cabotagem',
-    cargoType: 'Lotação',
-    cargoDescription: 'Electronics Components',
-    value: 'R$ 450.000,00',
-    plate: 'CAB-9988',
-    seals: 'S-001, S-002',
-    booking: 'B-112233',
-    trackingTag: 'T-001',
-    invoices: [
-      { nf: 'NF-001242', value: '12.450,00' },
-      { nf: 'NF-001243', value: '4.210,50' },
-      { nf: 'NF-001268', value: '158.900,00' },
-    ],
-    checkpoints: [
-      { id: 'c1', label: 'DeadLine Navio', status: 'completed', timestamp: '08:30 AM', location: 'Manaus, AM' },
-      { id: 'c2', label: 'Saída Navio MAO', status: 'completed', timestamp: '02:15 PM', location: 'Manaus, AM' },
-      { id: 'c3', label: 'Chegada Navio SSZ', status: 'current', details: 'In Transit - Sea' },
-      { id: 'c4', label: 'Time Movimentação Porto', status: 'pending' },
-      { id: 'c5', label: 'Chegada Cliente', status: 'pending' }
-    ]
-  },
-  {
-    id: '2',
-    code: 'OKA-2026-0098',
-    mode: 'Road',
-    origin: 'Manaus (MAO)',
-    destination: 'Extrema (MG)',
-    status: 'on-route',
-    leadTime: 16,
-    currentTransitTime: 6,
-    departureDate: '2026-02-19',
-    carrier: 'Rodoviário - LogExpress',
-    cargoType: 'Lotação',
-    cargoDescription: 'Automotive Parts',
-    value: 'R$ 210.000,00',
-    plate: 'ROD-1122',
-    seals: 'S-101',
-    booking: 'BK-0098',
-    trackingTag: 'TAG-98',
-    invoices: [],
-    checkpoints: [
-      { id: 'c1', label: 'Saída MAO', status: 'completed', timestamp: '10:00 AM', location: 'Manaus, AM' },
-      { id: 'c2', label: 'Chegada BEL', status: 'current', details: 'In Transit to Belém' },
-      { id: 'c3', label: 'Saída BEL', status: 'pending' },
-      { id: 'c4', label: 'Chegada Cliente', status: 'pending' }
-    ]
-  },
-  {
-    id: '3',
-    code: 'OKA-2026-0201',
-    mode: 'Air',
-    origin: 'Manaus (MAO)',
-    destination: 'Extrema (MG)',
-    status: 'loading',
-    leadTime: 5,
-    currentTransitTime: 1,
-    departureDate: '2026-02-24',
-    carrier: 'Air Freight - Priority',
-    cargoType: 'Fracionado',
-    cargoDescription: 'Consumer Goods',
-    value: 'R$ 120.000,00',
-    plate: 'AIR-4455',
-    seals: 'N/A',
-    booking: 'B-2021',
-    trackingTag: 'T-2021',
-    invoices: [],
-    checkpoints: [
-      { id: 'c1', label: 'Saída MAO', status: 'current', details: 'Loading at Terminal' },
-      { id: 'c2', label: 'Chegada GRU', status: 'pending' },
-      { id: 'c3', label: 'Chegada Cliente', status: 'pending' }
-    ]
-  }
-];
+const INITIAL_SHIPMENTS: Shipment[] = [];
 
 // --- Components ---
 
-const Header = ({ activeTab, onTabChange }: { activeTab: string; onTabChange: (tab: string) => void }) => (
+const Header = ({ activeTab, onTabChange, profile, permissions }: { activeTab: string; onTabChange: (tab: string) => void, profile?: Profile | null, permissions: ModuleAccess[] }) => (
   <header className="bg-white border-b border-slate-200 sticky top-0 z-50">
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
       <div className="flex justify-between h-16 items-center">
         <div className="flex items-center gap-8">
-          <div className="flex items-center gap-2 cursor-pointer" onClick={() => onTabChange('dashboard')}>
-            <div className="bg-blue-600 p-1.5 rounded-lg">
+          <div className="flex items-center gap-2 cursor-pointer group" onClick={() => onTabChange('home')}>
+            <div className="bg-blue-600 p-1.5 rounded-lg group-hover:bg-blue-700 transition-colors shadow-lg shadow-blue-200">
               <Package className="w-6 h-6 text-white" />
             </div>
-            <span className="text-xl font-bold tracking-tight text-slate-900">CargoTrack</span>
+            <span className="text-xl font-bold tracking-tight text-slate-900 group-hover:text-blue-600 transition-colors">CargoTrack</span>
           </div>
           <nav className="hidden md:flex space-x-8">
-            {['Dashboard', 'Shipments', 'Reports', 'Settings'].map((tab) => (
-              <button
-                key={tab}
-                onClick={() => onTabChange(tab.toLowerCase())}
-                className={`text-sm font-medium transition-colors relative py-5 ${activeTab === tab.toLowerCase() ? 'text-blue-600' : 'text-slate-500 hover:text-slate-900'
-                  }`}
-              >
-                {tab}
-                {activeTab === tab.toLowerCase() && (
-                  <motion.div layoutId="activeTab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600" />
-                )}
-              </button>
-            ))}
+            {['Dashboard', 'Shipments', 'Payments', 'Reports', 'Settings'].map((tab) => {
+              if (tab === 'Settings' && profile?.role !== 'super-admin' && profile?.role !== 'company-admin') return null;
+              if (tab === 'Payments' && profile?.role !== 'super-admin' && profile?.role !== 'company-admin' && !permissions.some(p => p.module_id === 'payments')) return null;
+              return (
+                <button
+                  key={tab}
+                  onClick={() => onTabChange(tab.toLowerCase())}
+                  className={`text-sm font-medium transition-colors relative py-5 ${activeTab === tab.toLowerCase() ? 'text-blue-600' : 'text-slate-500 hover:text-slate-900'
+                    }`}
+                >
+                  {tab}
+                  {activeTab === tab.toLowerCase() && (
+                    <motion.div layoutId="activeTab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600" />
+                  )}
+                </button>
+              );
+            })}
           </nav>
         </div>
         <div className="flex items-center gap-4">
-          <div className="relative hidden sm:block">
-            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-            <input
-              type="text"
-              placeholder="Search ID..."
-              className="pl-10 pr-4 py-2 bg-slate-100 border-none rounded-full text-sm w-48 focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all outline-none"
-            />
+          <div className="hidden lg:flex flex-col items-end mr-2">
+            <span className="text-xs font-bold text-slate-900">{profile?.email.split('@')[0]}</span>
+            <span className="text-[9px] font-bold text-blue-600 uppercase tracking-widest">{profile?.role}</span>
           </div>
-          <button className="p-2 text-slate-500 hover:bg-slate-100 rounded-full relative">
-            <Bell className="w-5 h-5" />
-            <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full border-2 border-white"></span>
+          <button
+            onClick={() => supabase.auth.signOut().then(() => window.location.reload())}
+            className="p-2 text-slate-500 hover:bg-red-50 hover:text-red-600 rounded-full transition-all group"
+            title="Sair"
+          >
+            <LogOut className="w-5 h-5" />
           </button>
           <div className="w-8 h-8 rounded-full bg-slate-200 flex items-center justify-center overflow-hidden border border-slate-300">
-            <img src="https://picsum.photos/seed/user/32/32" alt="User" referrerPolicy="no-referrer" />
+            <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${profile?.email || 'user'}`} alt="User" />
           </div>
         </div>
       </div>
@@ -299,48 +259,90 @@ const Header = ({ activeTab, onTabChange }: { activeTab: string; onTabChange: (t
   </header>
 );
 
-const MainPanel = ({ onNavigate }: { onNavigate: (view: any) => void }) => {
+const MainPanel = ({ onNavigate, profile, permissions }: { onNavigate: (view: any) => void, profile: Profile | null, permissions: ModuleAccess[] }) => {
   const modules = [
     { id: 'dashboard', title: 'Shipments', desc: 'Real-time tracking & delay alerts', icon: Truck, color: 'bg-blue-600', status: 'Active' },
     { id: 'freight-calc', title: 'FreightCalc', desc: 'Simulator & performance ranking', icon: Calculator, color: 'bg-emerald-600', status: 'Beta' },
-    { id: 'cargo-fit', title: 'CargoFit', desc: 'Trailer occupation & optimization', icon: Box, color: 'bg-amber-600', status: 'New' },
-    { id: 'reports', title: 'Reports & BI', desc: 'BI & performance analytics', icon: BarChart3, color: 'bg-purple-600', status: 'Premium' },
-    { id: 'fork-manager', title: 'ForkManager', desc: 'Fleet maintenance & OS control', icon: Zap, color: 'bg-orange-600', status: 'New' }
+    { id: 'cargo-fit', title: 'CargoFit', desc: 'Trailer occupation & optimization', icon: Box, color: 'bg-amber-600', status: 'Coming Soon' },
+    { id: 'fork-manager', title: 'ForkManager', desc: 'Fleet maintenance & OS control', icon: Zap, color: 'bg-orange-600', status: 'Coming Soon' },
+    { id: 'payments', title: 'Payments', desc: 'Invoices, slips & financial management', icon: CreditCard, color: 'bg-rose-600', status: 'New' },
+    { id: 'docs', title: 'Documents', desc: 'ISO, SGI, ASO & contract tracking', icon: ShieldCheck, color: 'bg-cyan-600', status: 'New' },
   ];
+
+  const hasAccess = (modId: string) => {
+    if (profile?.role === 'super-admin') return true;
+    return permissions.some(p => p.module_id === modId);
+  };
+
+  const getPermType = (modId: string) => {
+    if (profile?.role === 'super-admin') return 'edit';
+    return permissions.find(p => p.module_id === modId)?.permission_type || null;
+  };
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
-      <div className="mb-12">
-        <h1 className="text-4xl font-extrabold text-slate-900 tracking-tight">CargoTrack <span className="text-blue-600">Pro</span></h1>
-        <p className="text-slate-500 mt-3 text-lg">Integrated Logistics Suite for Modern Supply Chain Management.</p>
+      <div className="mb-12 flex flex-col md:flex-row md:items-end justify-between gap-6">
+        <div>
+          <h1 className="text-4xl font-extrabold text-slate-900 tracking-tight">CargoTrack <span className="text-blue-600">Pro</span></h1>
+          <p className="text-slate-500 mt-2 text-lg">Integrated Logistics Suite for Modern Supply Chain Management.</p>
+        </div>
+        <div className="flex items-center gap-2 bg-blue-50 px-4 py-2 rounded-xl text-blue-700 font-bold text-xs">
+          <ShieldCheck className="w-4 h-4" /> Global Control Enabled ({profile?.role})
+        </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-        {modules.map((m) => (
-          <motion.div
-            key={m.id}
-            whileHover={{ y: -5, scale: 1.02 }}
-            onClick={() => onNavigate(m.id)}
-            className="bg-white rounded-3xl p-8 border border-slate-200 shadow-sm hover:shadow-xl transition-all cursor-pointer relative overflow-hidden group"
-          >
-            <div className={`w-16 h-16 ${m.color} rounded-2xl flex items-center justify-center mb-6 shadow-lg group-hover:rotate-6 transition-transform`}>
-              <m.icon className="w-8 h-8 text-white" />
-            </div>
-            <div className="absolute top-6 right-6">
-              <span className={`px-2 py-1 rounded-full text-[9px] font-bold uppercase tracking-widest ${m.status === 'Active' ? 'bg-blue-50 text-blue-600' :
-                m.status === 'Beta' ? 'bg-emerald-50 text-emerald-600' :
-                  'bg-amber-50 text-amber-600'
-                }`}>
-                {m.status}
-              </span>
-            </div>
-            <h3 className="text-xl font-bold text-slate-900 mb-2">{m.title}</h3>
-            <p className="text-slate-500 text-sm leading-relaxed">{m.desc}</p>
-            <div className="mt-8 flex items-center text-blue-600 text-sm font-bold gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-              Access Module <ChevronRight className="w-4 h-4" />
-            </div>
-          </motion.div>
-        ))}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        {modules.map((m) => {
+          const locked = !hasAccess(m.id);
+          const permType = getPermType(m.id);
+
+          return (
+            <motion.div
+              key={m.id}
+              whileHover={!locked ? { y: -5, scale: 1.01 } : {}}
+              onClick={() => !locked && onNavigate(m.id)}
+              className={`bg-white rounded-2xl p-6 border border-slate-200 shadow-sm transition-all relative overflow-hidden group 
+              ${locked ? 'cursor-not-allowed grayscale' : 'cursor-pointer hover:shadow-lg hover:border-blue-100'} 
+              flex items-center gap-6 h-32`}
+            >
+              <div className={`w-16 h-16 shrink-0 ${locked ? 'bg-slate-200' : m.color} rounded-xl flex items-center justify-center shadow-md transition-transform ${!locked && 'group-hover:scale-110'}`}>
+                <m.icon className={`w-8 h-8 ${locked ? 'text-slate-400' : 'text-white'}`} />
+              </div>
+
+              <div className="flex-1">
+                <div className="flex items-center justify-between mb-1">
+                  <h3 className="text-lg font-bold text-slate-900">{m.title}</h3>
+                  <span className={`px-2 py-0.5 rounded-full text-[8px] font-bold uppercase tracking-widest ${locked ? 'bg-slate-100 text-slate-400' :
+                    m.status === 'Active' ? 'bg-blue-50 text-blue-600' : 'bg-emerald-50 text-emerald-600'
+                    }`}>
+                    {locked ? 'Locked' : m.status}
+                  </span>
+                </div>
+                <p className="text-slate-500 text-xs leading-tight line-clamp-2">{m.desc}</p>
+                {permType && (
+                  <div className="mt-2 flex items-center gap-1.5">
+                    <div className={`w-1.5 h-1.5 rounded-full ${permType === 'edit' ? 'bg-emerald-400' : 'bg-blue-400'}`}></div>
+                    <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">{permType} access</span>
+                  </div>
+                )}
+              </div>
+
+              {locked && (
+                <div className="absolute inset-0 bg-slate-50/20 backdrop-blur-[1px] flex items-center justify-end pr-4 pointer-events-none">
+                  <div className="bg-white/90 p-2 rounded-full shadow-sm border border-slate-100">
+                    <Lock className="w-4 h-4 text-slate-400" />
+                  </div>
+                </div>
+              )}
+
+              {!locked && (
+                <div className="absolute bottom-2 right-4 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <ChevronRight className="w-4 h-4 text-blue-500" />
+                </div>
+              )}
+            </motion.div>
+          );
+        })}
       </div>
     </div>
   );
@@ -704,7 +706,7 @@ const CreateShipment = ({ onCancel, onSave }: { onCancel: () => void; onSave: (s
 
       const newShipment: Shipment = {
         id: Math.random().toString(36).substr(2, 9),
-        code: `OKA-2026-${Math.floor(1000 + Math.random() * 9000)}`,
+        code: `OKA-2026-${Date.now().toString().slice(-6)}`,
         mode,
         origin,
         destination,
@@ -1405,10 +1407,825 @@ const StatusUpdateModal = ({
   );
 };
 
+const SettingsPanel = ({ onBack, currentUser }: { onBack: () => void, currentUser: Profile | null }) => {
+  const [users, setUsers] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [editingUser, setEditingUser] = useState<any>(null);
+  const [newUserEmail, setNewUserEmail] = useState('');
+  const [newUserRole, setNewUserRole] = useState<UserRole>('user');
+
+  const availableModules = [
+    { id: 'dashboard', label: 'Shipments' },
+    { id: 'freight-calc', label: 'FreightCalc' },
+    { id: 'cargo-fit', label: 'CargoFit' },
+    { id: 'fork-manager', label: 'ForkManager' },
+    { id: 'payments', label: 'Payments' },
+    { id: 'docs', label: 'Documents' }
+  ];
+
+  useEffect(() => {
+    fetchUsers();
+  }, [currentUser]);
+
+  const fetchUsers = async () => {
+    setLoading(true);
+    try {
+      let query = supabase.from('profiles').select('*, user_module_access(*), companies(name)');
+      if (currentUser?.role === 'company-admin') {
+        query = query.eq('company_id', currentUser.company_id);
+      }
+      const { data, error } = await query;
+      if (error) throw error;
+      setUsers(data || []);
+    } catch (err) {
+      console.error('Error fetching users:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDeleteUser = async (userId: string) => {
+    if (!window.confirm('Are you sure you want to delete this user? This action is irreversible.')) return;
+    try {
+      // First delete related module access entries
+      await supabase.from('user_module_access').delete().eq('user_id', userId);
+      // Then delete the profile
+      const { error } = await supabase.from('profiles').delete().eq('id', userId);
+      if (error) throw error;
+
+      alert('User deleted successfully.');
+      fetchUsers();
+    } catch (err) {
+      console.error('Error deleting user:', err);
+      alert('Error deleting user');
+    }
+  };
+
+  const savePermissions = async (userId: string, modulePermissions: any[], role: UserRole) => {
+    try {
+      // Update user role
+      await supabase.from('profiles').update({ role: role }).eq('id', userId);
+
+      // Delete existing permissions
+      await supabase.from('user_module_access').delete().eq('user_id', userId);
+
+      // Insert new permissions
+      if (modulePermissions.length > 0) {
+        const toInsert = modulePermissions.map(mp => ({
+          user_id: userId,
+          module_id: mp.module_id,
+          permission_type: mp.permission_type
+        }));
+        const { error: insertError } = await supabase.from('user_module_access').insert(toInsert);
+        if (insertError) throw insertError;
+      }
+      alert('Permissions and role updated successfully!');
+      fetchUsers();
+      setIsModalOpen(false);
+    } catch (err) {
+      console.error('Error saving permissions:', err);
+      alert('Error saving permissions');
+    }
+  };
+
+  const handleInviteNewUser = async () => {
+    if (!newUserEmail) {
+      alert('Please enter an email for the new collaborator.');
+      return;
+    }
+
+    // Check if user already exists
+    const { data: existingUser } = await supabase
+      .from('profiles')
+      .select('id')
+      .eq('email', newUserEmail)
+      .single();
+
+    if (existingUser) {
+      alert('This email is already in use.');
+      return;
+    }
+
+    try {
+      const { data, error } = await supabase
+        .from('profiles')
+        .insert({
+          email: newUserEmail,
+          role: newUserRole,
+          company_id: currentUser?.company_id || null,
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      alert(`Invitation for ${newUserEmail} created successfully! The user can now register and their profile will be linked.`);
+      setNewUserEmail('');
+      setNewUserRole('user');
+      fetchUsers();
+      setIsModalOpen(false);
+    } catch (err: any) {
+      console.error('Error inviting new user:', err);
+      alert('Error inviting new user: ' + (err.message || 'Check if email is already in use.'));
+    }
+  };
+
+  return (
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+      <div className="flex items-center justify-between mb-8">
+        <div className="flex items-center gap-4">
+          <button onClick={onBack} className="p-2 hover:bg-slate-100 rounded-full transition-colors"><ArrowLeft className="w-5 h-5 text-slate-600" /></button>
+          <div>
+            <h1 className="text-3xl font-bold text-slate-900">Access Management</h1>
+            <p className="text-slate-500">Control users and system permissions.</p>
+          </div>
+        </div>
+        <button
+          onClick={() => { setEditingUser(null); setNewUserEmail(''); setNewUserRole('user'); setIsModalOpen(true); }}
+          className="px-6 py-2 bg-blue-600 text-white rounded-xl font-bold text-sm shadow-lg shadow-blue-100 hover:bg-blue-700 transition-all"
+        >
+          + New Collaborator
+        </button>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
+        <div className="lg:col-span-3">
+          <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
+            <div className="p-6 border-b border-slate-100 flex items-center justify-between">
+              <h3 className="font-bold text-slate-900 flex items-center gap-2">
+                <Users className="w-5 h-5 text-blue-600" /> Collaborators
+              </h3>
+            </div>
+            <div className="divide-y divide-slate-100">
+              {loading ? (
+                <div className="p-12 text-center text-slate-400">Loading users...</div>
+              ) : users.length === 0 ? (
+                <div className="p-12 text-center text-slate-400">No users found.</div>
+              ) : users.map(user => (
+                <div key={user.id} className="p-6 hover:bg-slate-50 transition-colors group">
+                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
+                    <div className="flex items-center gap-4">
+                      <div className="w-12 h-12 rounded-full bg-slate-100 flex items-center justify-center font-bold text-slate-500 text-lg border-2 border-white shadow-sm">
+                        {user.email.charAt(0).toUpperCase()}
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <p className="text-sm font-bold text-slate-900">{user.email}</p>
+                          <span className={`px-2 py-0.5 rounded-full text-[8px] font-extrabold uppercase tracking-widest ${user.role === 'super-admin' ? 'bg-purple-100 text-purple-600' :
+                            user.role === 'company-admin' ? 'bg-blue-100 text-blue-600' : 'bg-slate-100 text-slate-500'
+                            }`}>
+                            {user.role}
+                          </span>
+                        </div>
+                        <p className="text-xs text-slate-400 mt-0.5">ID: {user.id.slice(0, 8)}... {user.companies?.name && `· ${user.companies.name}`}</p>
+                      </div>
+                    </div>
+
+                    <div className="flex-1 max-w-md">
+                      <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-2">Released Modules</p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {user.user_module_access?.length > 0 ? user.user_module_access.map((acc: any) => (
+                          <div key={acc.module_id} className="flex items-center bg-slate-100 rounded-md px-2 py-1">
+                            <span className="text-[9px] font-bold text-slate-600 uppercase mr-1.5">{acc.module_id}</span>
+                            <span className={`text-[8px] font-extrabold px-1 rounded ${acc.permission_type === 'edit' ? 'bg-emerald-500 text-white' : 'bg-blue-500 text-white'}`}>
+                              {acc.permission_type.toUpperCase()}
+                            </span>
+                          </div>
+                        )) : (
+                          <span className="text-[10px] text-slate-300 italic">No access configured</span>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => { setEditingUser(user); setIsModalOpen(true); }}
+                        className="p-2.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-xl transition-all"
+                      >
+                        <Settings className="w-4 h-4" />
+                      </button>
+                      <button
+                        onClick={() => handleDeleteUser(user.id)}
+                        className="p-2.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-xl transition-all"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <div className="space-y-6">
+          <div className="bg-slate-900 rounded-2xl p-6 text-white shadow-xl">
+            <ShieldCheck className="w-8 h-8 text-blue-400 mb-4" />
+            <h3 className="font-bold text-lg mb-2">Control Panel</h3>
+            <p className="text-slate-400 text-xs leading-relaxed mb-6">
+              As an administrator, you can manage collaborators in your organization and define the level of permission (View/Edit) for each module.
+            </p>
+            <div className="p-4 bg-white/5 border border-white/10 rounded-xl">
+              <p className="text-[10px] font-bold text-blue-400 uppercase tracking-widest mb-1">Current Company</p>
+              <p className="text-sm font-bold truncate">{currentUser?.company_name || 'CargoTrack Global'}</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {isModalOpen && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+          <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="bg-white rounded-3xl w-full max-w-2xl shadow-2xl overflow-hidden">
+            <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
+              <h3 className="text-xl font-bold text-slate-900">{editingUser ? 'Edit Collaborator' : 'New Collaborator'}</h3>
+              <button onClick={() => setIsModalOpen(false)} className="p-2 hover:bg-slate-200 rounded-full transition-colors font-bold text-slate-400">×</button>
+            </div>
+
+            <div className="p-8 space-y-6 overflow-y-auto max-h-[70vh]">
+              {!editingUser && (
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Collaborator Email</label>
+                  <input
+                    type="email"
+                    placeholder="email@company.com"
+                    value={newUserEmail}
+                    onChange={(e) => setNewUserEmail(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 px-4 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+              )}
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Role</label>
+                  <select
+                    value={editingUser?.role || newUserRole}
+                    onChange={(e) => {
+                      if (editingUser) {
+                        setEditingUser({ ...editingUser, role: e.target.value as UserRole });
+                      } else {
+                        setNewUserRole(e.target.value as UserRole);
+                      }
+                    }}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 px-4 text-sm outline-none"
+                  >
+                    <option value="user">User</option>
+                    <option value="analyst">Analyst</option>
+                    <option value="company-admin">Company Admin</option>
+                    {currentUser?.role === 'super-admin' && <option value="super-admin">Super Admin</option>}
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1 mb-4">Configure Module Access</p>
+                <div className="space-y-3">
+                  {availableModules.map(mod => {
+                    const targetUser = editingUser || { user_module_access: [] };
+                    const currentAccess = targetUser.user_module_access?.find((a: any) => a.module_id === mod.id);
+                    return (
+                      <div key={mod.id} className="flex items-center justify-between p-3 border border-slate-100 rounded-2xl hover:bg-slate-50">
+                        <div className="flex items-center gap-3">
+                          <div className={`w-2 h-2 rounded-full ${currentAccess ? 'bg-emerald-500' : 'bg-slate-200'}`}></div>
+                          <span className="text-xs font-bold text-slate-700">{mod.label}</span>
+                        </div>
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => {
+                              const newPerms = currentAccess ?
+                                targetUser.user_module_access.filter((a: any) => a.module_id !== mod.id) :
+                                [...(targetUser?.user_module_access || []), { module_id: mod.id, permission_type: 'view' }];
+                              if (editingUser) {
+                                setEditingUser({ ...editingUser, user_module_access: newPerms });
+                              } else {
+                                // For logic consistency, we'll need to store temporary perms for NEW users
+                                // but for now we focus on finishing the creation first.
+                              }
+                            }}
+                            className={`px-3 py-1.5 rounded-lg text-[9px] font-bold uppercase ${currentAccess ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-400'}`}
+                          >
+                            {currentAccess ? 'Released' : 'Locked'}
+                          </button>
+                          {currentAccess && (
+                            <select
+                              value={currentAccess.permission_type}
+                              onChange={(e) => {
+                                const newPerms = targetUser.user_module_access.map((a: any) => a.module_id === mod.id ? { ...a, permission_type: e.target.value as PermissionType } : a);
+                                if (editingUser) {
+                                  setEditingUser({ ...editingUser, user_module_access: newPerms });
+                                }
+                              }}
+                              className="bg-white border border-slate-200 rounded-lg text-[9px] font-bold uppercase px-2 py-1 outline-none"
+                            >
+                              <option value="view">View</option>
+                              <option value="edit">Edit</option>
+                            </select>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+
+            <div className="p-6 border-t border-slate-100 bg-slate-50/50 flex gap-3">
+              <button onClick={() => setIsModalOpen(false)} className="flex-1 py-3 text-sm font-bold text-slate-500 hover:bg-slate-200 rounded-xl transition-all">Cancel</button>
+              <button
+                onClick={async () => {
+                  if (editingUser) {
+                    await savePermissions(editingUser.id, editingUser.user_module_access, editingUser.role);
+                  } else {
+                    await handleInviteNewUser();
+                  }
+                }}
+                className="flex-[2] py-3 bg-blue-600 text-white text-sm font-bold rounded-xl shadow-lg shadow-blue-200 hover:bg-blue-700 transition-all font-extrabold"
+              >
+                {editingUser ? 'Save Changes' : 'Invite Collaborator'}
+              </button>
+            </div>
+          </motion.div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+const PaymentsPanel = ({ onBack, profile }: { onBack: () => void, profile: Profile | null }) => {
+  const [payments, setPayments] = useState<Payment[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [filterPaid, setFilterPaid] = useState(true);
+
+  const [newPayment, setNewPayment] = useState({
+    type: 'monthly',
+    document_type: 'NF',
+    document_number: '',
+    amount: '',
+    description: '',
+    due_date: new Date().toISOString().split('T')[0]
+  });
+
+  const fetchPayments = async () => {
+    setLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from('payments')
+        .select('*')
+        .order('due_date', { ascending: true });
+      if (error) throw error;
+      setPayments(data || []);
+    } catch (err) {
+      console.error('Error fetching payments:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchPayments();
+  }, [profile]);
+
+  const handleCreate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!profile?.company_id) {
+      alert('Company ID not found in profile.');
+      return;
+    }
+    try {
+      const { error } = await supabase.from('payments').insert([{
+        type: newPayment.type,
+        document_type: newPayment.document_type,
+        document_number: newPayment.document_number,
+        amount: parseFloat(newPayment.amount),
+        description: newPayment.description,
+        due_date: newPayment.due_date,
+        company_id: profile.company_id,
+        status: 'pending'
+      }]);
+      if (error) throw error;
+      setShowCreateModal(false);
+      fetchPayments();
+      setNewPayment({
+        type: 'monthly',
+        document_type: 'NF',
+        document_number: '',
+        amount: '',
+        description: '',
+        due_date: new Date().toISOString().split('T')[0]
+      });
+    } catch (err) {
+      console.error(err);
+      alert('Error creating payment record');
+    }
+  };
+
+  const markAsPaid = async (id: string) => {
+    try {
+      const { error } = await supabase
+        .from('payments')
+        .update({ status: 'paid', paid_at: new Date().toISOString() })
+        .eq('id', id);
+      if (error) throw error;
+      fetchPayments();
+    } catch (err) {
+      alert('Error updating status');
+    }
+  };
+
+  const getStatusDetails = (payment: Payment) => {
+    if (payment.status === 'paid') return { label: 'Paid', color: 'bg-emerald-100 text-emerald-600', icon: CheckCircle2 };
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const due = new Date(payment.due_date);
+    due.setHours(0, 0, 0, 0);
+
+    if (due < today) return { label: 'Overdue', color: 'bg-red-100 text-red-600', icon: AlertTriangle };
+
+    const diffTime = due.getTime() - today.getTime();
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    if (diffDays >= 0 && diffDays <= 3) return { label: 'Near Expiry', color: 'bg-amber-100 text-amber-600', icon: Bell };
+
+    return { label: 'Pending', color: 'bg-blue-100 text-blue-600', icon: Clock };
+  };
+
+  const stats = useMemo(() => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const active = payments.filter(p => p.status === 'pending');
+
+    return {
+      totalPending: active.length,
+      overdue: active.filter(p => new Date(p.due_date) < today).length,
+      nearExpiry: active.filter(p => {
+        const due = new Date(p.due_date);
+        const diffDays = Math.ceil((due.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+        return diffDays >= 0 && diffDays <= 3;
+      }).length,
+      totalAmount: active.reduce((acc, p) => acc + (Number(p.amount) || 0), 0)
+    };
+  }, [payments]);
+
+  const filteredPayments = filterPaid ? payments.filter(p => p.status !== 'paid') : payments;
+
+  return (
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-12">
+        <div className="flex items-center gap-4">
+          <button onClick={onBack} className="p-2 hover:bg-slate-100 rounded-full transition-colors">
+            <ArrowLeft className="w-5 h-5 text-slate-600" />
+          </button>
+          <div>
+            <h1 className="text-3xl font-bold text-slate-900">Payments & Financial</h1>
+            <p className="text-slate-500">Manage invoices, extra services and recurring payments.</p>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => setFilterPaid(!filterPaid)}
+            className={`px-4 py-2 rounded-xl border text-sm font-bold transition-all ${filterPaid ? 'bg-blue-50 border-blue-200 text-blue-600' : 'bg-white border-slate-200 text-slate-600'
+              }`}
+          >
+            {filterPaid ? 'Showing Pending Only' : 'Showing All Payments'}
+          </button>
+          <button
+            onClick={() => setShowCreateModal(true)}
+            className="px-6 py-2 bg-rose-600 text-white rounded-xl font-bold text-sm shadow-lg shadow-rose-100 hover:bg-rose-700 transition-all flex items-center gap-2"
+          >
+            <Plus className="w-4 h-4" /> New Payment
+          </button>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-12">
+        <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+          <div className="flex items-center gap-3 mb-2">
+            <div className="p-2 bg-blue-50 rounded-lg"><Clock className="w-4 h-4 text-blue-600" /></div>
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Total Pending</span>
+          </div>
+          <p className="text-2xl font-bold text-slate-900">{stats.totalPending}</p>
+          <p className="text-xs text-slate-500 mt-1">Awaiting payment</p>
+        </div>
+        <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+          <div className="flex items-center gap-3 mb-2">
+            <div className="p-2 bg-amber-50 rounded-lg"><Bell className="w-4 h-4 text-amber-600" /></div>
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Near Expiry</span>
+          </div>
+          <p className="text-2xl font-bold text-amber-600">{stats.nearExpiry}</p>
+          <p className="text-xs text-slate-500 mt-1">Due in 1-3 days</p>
+        </div>
+        <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm border-l-4 border-l-red-500">
+          <div className="flex items-center gap-3 mb-2">
+            <div className="p-2 bg-red-50 rounded-lg"><AlertTriangle className="w-4 h-4 text-red-600" /></div>
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Overdue</span>
+          </div>
+          <p className="text-2xl font-bold text-red-600">{stats.overdue}</p>
+          <p className="text-xs text-slate-500 mt-1">Expired documents</p>
+        </div>
+        <div className="bg-slate-900 p-6 rounded-2xl shadow-xl">
+          <div className="flex items-center gap-3 mb-2">
+            <div className="p-2 bg-white/10 rounded-lg"><Calculator className="w-4 h-4 text-blue-400" /></div>
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Balance Payable</span>
+          </div>
+          <p className="text-2xl font-bold text-white">R$ {stats.totalAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</p>
+          <p className="text-xs text-slate-500 mt-1">Sum of all pending</p>
+        </div>
+      </div>
+
+      <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
+        <div className="overflow-x-auto">
+          <table className="w-full text-left border-collapse">
+            <thead>
+              <tr className="bg-slate-50 border-b border-slate-100">
+                <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Document</th>
+                <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Type</th>
+                <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Due Date</th>
+                <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Amount</th>
+                <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Status</th>
+                <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {loading ? (
+                <tr><td colSpan={6} className="px-6 py-12 text-center text-slate-400">Loading records...</td></tr>
+              ) : filteredPayments.length === 0 ? (
+                <tr><td colSpan={6} className="px-6 py-12 text-center text-slate-400">No records found.</td></tr>
+              ) : filteredPayments.map(p => {
+                const status = getStatusDetails(p);
+                return (
+                  <tr key={p.id} className="hover:bg-slate-50 transition-colors group">
+                    <td className="px-6 py-4">
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-lg bg-slate-100 flex items-center justify-center">
+                          <FileText className="w-4 h-4 text-slate-500" />
+                        </div>
+                        <div>
+                          <p className="text-sm font-bold text-slate-900">{p.document_type} {p.document_number || '---'}</p>
+                          <p className="text-[10px] text-slate-400 truncate max-w-[200px]">{p.description}</p>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="px-6 py-4">
+                      <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold uppercase ${p.type === 'monthly' ? 'bg-purple-50 text-purple-600' : 'bg-slate-100 text-slate-600'
+                        }`}>
+                        {p.type}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4">
+                      <div className="flex items-center gap-2">
+                        <Calendar className="w-3.5 h-3.5 text-slate-400" />
+                        <p className="text-xs font-medium text-slate-700">{new Date(p.due_date).toLocaleDateString('pt-BR')}</p>
+                      </div>
+                    </td>
+                    <td className="px-6 py-4 font-bold text-slate-900 text-sm">
+                      R$ {Number(p.amount).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                    </td>
+                    <td className="px-6 py-4">
+                      <div className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full ${status.color}`}>
+                        <status.icon className="w-3 h-3" />
+                        <span className="text-[10px] font-bold uppercase">{status.label}</span>
+                      </div>
+                    </td>
+                    <td className="px-6 py-4 text-right">
+                      {p.status === 'pending' && (
+                        <button
+                          onClick={() => markAsPaid(p.id)}
+                          className="px-3 py-1.5 bg-emerald-50 text-emerald-600 rounded-lg text-[10px] font-bold uppercase hover:bg-emerald-100 transition-colors"
+                        >
+                          Mark as Paid
+                        </button>
+                      )}
+                      {p.status === 'paid' && (
+                        <div className="text-[10px] text-slate-400 font-medium">
+                          Paid on {new Date(p.paid_at!).toLocaleDateString('pt-BR')}
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {showCreateModal && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+          <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="bg-white rounded-3xl w-full max-w-xl shadow-2xl overflow-hidden">
+            <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
+              <h3 className="text-xl font-bold text-slate-900">New Payment/Service</h3>
+              <button onClick={() => setShowCreateModal(false)} className="p-2 hover:bg-slate-200 rounded-full transition-colors font-bold text-slate-400">×</button>
+            </div>
+
+            <form onSubmit={handleCreate} className="p-8 space-y-6">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Payment Type</label>
+                  <select
+                    value={newPayment.type}
+                    onChange={(e) => setNewPayment({ ...newPayment, type: e.target.value as any })}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 px-4 text-sm outline-none"
+                  >
+                    <option value="monthly">Monthly Recurring</option>
+                    <option value="extra">Extra Service</option>
+                  </select>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Document Type</label>
+                  <select
+                    value={newPayment.document_type}
+                    onChange={(e) => setNewPayment({ ...newPayment, document_type: e.target.value as any })}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 px-4 text-sm outline-none"
+                  >
+                    <option value="NF">Nota Fiscal (NF)</option>
+                    <option value="ND">Nota de Débito (ND)</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Doc Number</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="000.000"
+                    value={newPayment.document_number}
+                    onChange={(e) => setNewPayment({ ...newPayment, document_number: e.target.value })}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 px-4 text-sm outline-none"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Value (R$)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    required
+                    placeholder="0,00"
+                    value={newPayment.amount}
+                    onChange={(e) => setNewPayment({ ...newPayment, amount: e.target.value })}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 px-4 text-sm outline-none"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Due Date</label>
+                <input
+                  type="date"
+                  required
+                  value={newPayment.due_date}
+                  onChange={(e) => setNewPayment({ ...newPayment, due_date: e.target.value })}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 px-4 text-sm outline-none"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Description</label>
+                <textarea
+                  placeholder="Details about the service..."
+                  value={newPayment.description}
+                  onChange={(e) => setNewPayment({ ...newPayment, description: e.target.value })}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 px-4 text-sm outline-none h-24 resize-none"
+                />
+              </div>
+
+              <div className="flex gap-3 pt-4">
+                <button type="button" onClick={() => setShowCreateModal(false)} className="flex-1 py-3 text-sm font-bold text-slate-500 hover:bg-slate-100 rounded-xl transition-all">Cancel</button>
+                <button
+                  type="submit"
+                  className="flex-[2] py-3 bg-rose-600 text-white text-sm font-bold rounded-xl shadow-lg shadow-rose-100 hover:bg-rose-700 transition-all font-extrabold"
+                >
+                  Register Payment
+                </button>
+              </div>
+            </form>
+          </motion.div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+const Login = ({ onLogin }: { onLogin: (session: any) => void }) => {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    setError(null);
+
+    // Bypass for super-admin using env variables
+    const adminEmail = import.meta.env.VITE_ADMIN_EMAIL;
+    const adminPassword = import.meta.env.VITE_ADMIN_PASSWORD;
+
+    if (adminEmail && adminPassword && email === adminEmail && password === adminPassword) {
+      onLogin({ user: { email, id: '00000000-0000-0000-0000-000000000000' } });
+      setLoading(false);
+      return;
+    }
+
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+      if (error) throw error;
+      onLogin(data.session);
+    } catch (err: any) {
+      setError(err.message || 'Erro ao acessar o sistema');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4 relative overflow-hidden">
+      <div className="absolute top-0 left-0 w-full h-full bg-[radial-gradient(circle_at_50%_50%,#1e293b_0%,#0f172a_100%)]" />
+      <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-blue-600/10 blur-[120px] rounded-full" />
+      <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-blue-600/10 blur-[120px] rounded-full" />
+
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="w-full max-w-md bg-white/5 backdrop-blur-xl border border-white/10 rounded-3xl p-8 shadow-2xl relative z-10"
+      >
+        <div className="flex flex-col items-center mb-10">
+          <div className="bg-blue-600 p-4 rounded-2xl shadow-xl shadow-blue-900/40 mb-4">
+            <Package className="w-10 h-10 text-white" />
+          </div>
+          <h1 className="text-3xl font-extrabold text-white tracking-tight">CargoTrack <span className="text-blue-500">Pro</span></h1>
+          <p className="text-slate-400 mt-2 text-sm">Corporate Authentication Panel</p>
+        </div>
+
+        <form onSubmit={handleSubmit} className="space-y-5">
+          {error && (
+            <div className="bg-red-500/10 border border-red-500/20 text-red-400 px-4 py-3 rounded-xl text-xs font-bold flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4" /> {error}
+            </div>
+          )}
+
+          <div className="space-y-2">
+            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Corporate Email</label>
+            <div className="relative">
+              <Mail className="w-4 h-4 absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" />
+              <input
+                type="email"
+                required
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                className="w-full bg-slate-800/50 border border-white/5 rounded-2xl py-3 pl-12 pr-4 text-white text-sm outline-none focus:ring-2 focus:ring-blue-500/50 focus:bg-slate-800/80 transition-all font-medium"
+                placeholder="name@company.com"
+              />
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Access Password</label>
+            <div className="relative">
+              <Key className="w-4 h-4 absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" />
+              <input
+                type="password"
+                required
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="w-full bg-slate-800/50 border border-white/5 rounded-2xl py-3 pl-12 pr-4 text-white text-sm outline-none focus:ring-2 focus:ring-blue-500/50 focus:bg-slate-800/80 transition-all font-medium"
+                placeholder="••••••••"
+              />
+            </div>
+          </div>
+
+          <button
+            type="submit"
+            disabled={loading}
+            className="w-full bg-blue-600 hover:bg-blue-500 text-white font-extrabold py-4 rounded-2xl shadow-lg shadow-blue-900/40 transition-all active:scale-[0.98] disabled:opacity-50 disabled:active:scale-100 flex items-center justify-center gap-2"
+          >
+            {loading ? <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : 'Enter System'}
+          </button>
+        </form>
+
+        <div className="mt-8 pt-8 border-t border-white/5 text-center">
+          <p className="text-slate-500 text-xs font-medium">Forgot your password? <span className="text-blue-500 hover:underline cursor-pointer">Recover access</span></p>
+        </div>
+      </motion.div>
+
+      <div className="absolute bottom-8 text-center text-slate-600 text-[10px] font-bold uppercase tracking-[0.3em] opacity-40">
+        CargoTrack Logistics Pro · Security Standard v3.0
+      </div>
+    </div>
+  );
+};
+
 // --- Main App ---
 
 export default function App() {
-  const [view, setView] = useState<'home' | 'dashboard' | 'create' | 'detail' | 'freight-calc' | 'cargo-fit' | 'reports' | 'fork-manager'>('home');
+  const [session, setSession] = useState<any>(null);
+  const [profile, setProfile] = useState<Profile | null>(null);
+  const [permissions, setPermissions] = useState<ModuleAccess[]>([]);
+  const [view, setView] = useState<'home' | 'dashboard' | 'create' | 'detail' | 'freight-calc' | 'cargo-fit' | 'reports' | 'fork-manager' | 'settings' | 'payments' | 'docs'>('home');
   const [activeTab, setActiveTab] = useState('home');
   const [shipments, setShipments] = useState<Shipment[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1416,8 +2233,60 @@ export default function App() {
   const [showStatusModal, setShowStatusModal] = useState(false);
 
   useEffect(() => {
-    fetchShipments();
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session);
+    });
+
+    return () => subscription.unsubscribe();
   }, []);
+
+  useEffect(() => {
+    if (session) {
+      loadUserData();
+      fetchShipments();
+    }
+  }, [session]);
+
+  const loadUserData = async () => {
+    if (!session) return;
+
+    // Super admin bypass
+    if (session.user.id === '00000000-0000-0000-0000-000000000000') {
+      setProfile({
+        id: '00000000-0000-0000-0000-000000000000',
+        email: session.user.email,
+        role: 'super-admin'
+      });
+      return;
+    }
+
+    try {
+      const { data: prof, error: profErr } = await supabase
+        .from('profiles')
+        .select('*, companies(name)')
+        .eq('id', session.user.id)
+        .single();
+
+      if (profErr) throw profErr;
+
+      const { data: perms } = await supabase
+        .from('user_module_access')
+        .select('*')
+        .eq('user_id', session.user.id);
+
+      setProfile({
+        ...prof,
+        company_name: prof.companies?.name
+      });
+      setPermissions(perms || []);
+    } catch (err) {
+      console.error('Error loading profile:', err);
+    }
+  };
 
   const fetchShipments = async () => {
     try {
@@ -1454,10 +2323,10 @@ export default function App() {
         invoiceFileName: s.invoice_file_name
       }));
 
-      setShipments(mappedShipments.length > 0 ? mappedShipments : INITIAL_SHIPMENTS);
+      setShipments(mappedShipments);
     } catch (err) {
       console.error('Error fetching shipments:', err);
-      setShipments(INITIAL_SHIPMENTS);
+      setShipments([]);
     } finally {
       setLoading(false);
     }
@@ -1474,6 +2343,7 @@ export default function App() {
 
   const handleSaveShipment = async (s: Shipment) => {
     try {
+      setLoading(true);
       const { error } = await supabase
         .from('shipments')
         .insert([{
@@ -1499,15 +2369,19 @@ export default function App() {
           invoice_file_name: s.invoiceFileName
         }]);
 
-      if (error) throw error;
+      if (error) {
+        console.error('Database detailed error:', error);
+        throw error;
+      }
 
       await fetchShipments();
+      alert('Embarque salvo com sucesso no banco de dados!');
       setView('dashboard');
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error saving shipment:', err);
-      // Fallback to local state if DB fails (optional)
-      setShipments([s, ...shipments]);
-      setView('dashboard');
+      alert('Erro ao salvar no banco de dados: ' + (err.message || 'Erro desconhecido. Verifique o console.'));
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -1542,11 +2416,18 @@ export default function App() {
     setActiveTab(tab);
     if (tab === 'home') setView('home');
     if (tab === 'dashboard' || tab === 'shipments') setView('dashboard');
+    if (tab === 'reports') setView('reports');
+    if (tab === 'settings') setView('settings');
+    if (tab === 'payments') setView('payments');
   };
+
+  if (!session) {
+    return <Login onLogin={setSession} />;
+  }
 
   return (
     <div className="min-h-screen bg-slate-50 font-sans text-slate-900 selection:bg-blue-100 selection:text-blue-900">
-      <Header activeTab={activeTab} onTabChange={handleTabChange} />
+      <Header activeTab={activeTab} onTabChange={handleTabChange} profile={profile} permissions={permissions} />
 
       <main>
         <AnimatePresence mode="wait">
@@ -1558,7 +2439,18 @@ export default function App() {
               exit={{ opacity: 0, y: -10 }}
               transition={{ duration: 0.2 }}
             >
-              <MainPanel onNavigate={(v) => { setView(v); setActiveTab(v === 'dashboard' ? 'dashboard' : 'home'); }} />
+              <MainPanel
+                onNavigate={(v) => {
+                  setView(v);
+                  if (['dashboard', 'shipments', 'payments', 'reports', 'settings'].includes(v)) {
+                    setActiveTab(v === 'shipments' ? 'dashboard' : v);
+                  } else {
+                    setActiveTab('home');
+                  }
+                }}
+                profile={profile}
+                permissions={permissions}
+              />
             </motion.div>
           )}
 
@@ -1634,6 +2526,30 @@ export default function App() {
           {view === 'fork-manager' && (
             <motion.div key="fork" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
               <ForkManager onBack={() => setView('home')} />
+            </motion.div>
+          )}
+
+          {view === 'settings' && (
+            <motion.div key="settings" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+              <SettingsPanel onBack={() => setView('home')} currentUser={profile} />
+            </motion.div>
+          )}
+
+          {view === 'payments' && (
+            <motion.div key="payments" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+              <PaymentsPanel onBack={() => setView('home')} profile={profile} />
+            </motion.div>
+          )}
+
+          {view === 'reports' && (
+            <motion.div key="reports" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+              <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+                <h1 className="text-3xl font-bold mb-4">Reports & BI</h1>
+                <div className="bg-white p-12 rounded-2xl border border-dashed border-slate-300 flex flex-col items-center justify-center">
+                  <BarChart3 className="w-16 h-16 text-slate-300 mb-4" />
+                  <p className="text-slate-500 font-medium">Analytics dashboard is being synchronized...</p>
+                </div>
+              </div>
             </motion.div>
           )}
         </AnimatePresence>
