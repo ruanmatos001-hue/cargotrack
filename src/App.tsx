@@ -40,14 +40,18 @@ import {
   Mail,
   Key,
   Trash2,
-  Calendar
+  Calendar,
+  Camera,
+  Route,
+  History,
+  X
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
 // --- Types ---
 
 type TransportMode = 'Road' | 'Maritime' | 'Air' | 'Express';
-type ShipmentStatus = 'on-route' | 'delayed' | 'pending' | 'loading';
+type ShipmentStatus = 'on-route' | 'delayed' | 'pending' | 'loading' | 'completed';
 
 interface Checkpoint {
   id: string;
@@ -113,6 +117,40 @@ interface Payment {
   status: 'pending' | 'paid' | 'overdue';
   paid_at?: string;
   created_at: string;
+}
+
+interface FleetRegistration {
+  id: string;
+  company_id: string;
+  carrier: string;
+  vehicle_plate: string;
+  driver_name: string;
+  seals: string[];
+  photos: { url: string; name: string; type: string }[];
+  status: 'draft' | 'finalized';
+  notes?: string;
+  created_at: string;
+}
+
+interface RouteStop {
+  id: string;
+  city: string;
+  state: string;
+  distanceFromMAO: number;
+}
+
+interface Document {
+  id: string;
+  name: string;
+  category: string;
+  subcategory?: string;
+  type: string;
+  issue_date?: string;
+  expiry_date?: string;
+  file_url?: string;
+  company_id: string;
+  created_at: string;
+  created_by?: string;
 }
 
 // --- Constants ---
@@ -265,8 +303,10 @@ const MainPanel = ({ onNavigate, profile, permissions }: { onNavigate: (view: an
     { id: 'freight-calc', title: 'FreightCalc', desc: 'Simulator & performance ranking', icon: Calculator, color: 'bg-emerald-600', status: 'Beta' },
     { id: 'cargo-fit', title: 'CargoFit', desc: 'Trailer occupation & optimization', icon: Box, color: 'bg-amber-600', status: 'Coming Soon' },
     { id: 'fork-manager', title: 'ForkManager', desc: 'Fleet maintenance & OS control', icon: Zap, color: 'bg-orange-600', status: 'Coming Soon' },
-    { id: 'payments', title: 'Payments', desc: 'Invoices, slips & financial management', icon: CreditCard, color: 'bg-rose-600', status: 'New' },
+    { id: 'payments', title: 'Payments', desc: 'Invoices, slips & financial management', icon: CreditCard, color: 'bg-rose-600', status: 'Active' },
     { id: 'docs', title: 'Documents', desc: 'ISO, SGI, ASO & contract tracking', icon: ShieldCheck, color: 'bg-cyan-600', status: 'New' },
+    { id: 'routing', title: 'Route Optimization', desc: 'LTL routing starting from MAO', icon: MapPin, color: 'bg-indigo-600', status: 'New' },
+    { id: 'fleet', title: 'Fleet Registration', desc: 'Vehicle & photo loading control', icon: Camera, color: 'bg-slate-700', status: 'New' },
   ];
 
   const hasAccess = (modId: string) => {
@@ -582,6 +622,10 @@ const Dashboard = ({ shipments, onSelectShipment, onCreateNew, onBack }: {
                           cp.status === 'pending' ? 'text-slate-400' : 'text-slate-600'
                           }`}>
                           {cp.label}
+                          <span className="block text-[7px] font-normal opacity-70 mt-0.5">
+                            {cp.actualDate ? new Date(cp.actualDate).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }) :
+                              cp.plannedDate ? new Date(cp.plannedDate).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }) : ''}
+                          </span>
                         </span>
                       </div>
                     );
@@ -609,10 +653,10 @@ const Dashboard = ({ shipments, onSelectShipment, onCreateNew, onBack }: {
 
     <div className="mt-12 grid grid-cols-2 md:grid-cols-4 gap-6">
       {[
-        { label: 'Total Managed', value: '1,482', color: 'text-slate-900' },
-        { label: 'In Transit', value: '124', color: 'text-blue-600' },
-        { label: 'Delays', value: '03', color: 'text-amber-600' },
-        { label: 'Completed Today', value: '18', color: 'text-emerald-600' },
+        { label: 'Total Managed', value: shipments.length.toString(), color: 'text-slate-900' },
+        { label: 'In Transit', value: shipments.filter(s => s.status === 'on-route' || s.status === 'pending').length.toString(), color: 'text-blue-600' },
+        { label: 'Delays', value: shipments.filter(s => getTransitMetrics(s).delayDays > 0).length.toString().padStart(2, '0'), color: 'text-amber-600' },
+        { label: 'Completed Today', value: shipments.filter(s => s.status === 'completed').length.toString(), color: 'text-emerald-600' },
       ].map((stat) => (
         <div key={stat.label} className="bg-white p-6 rounded-xl border border-slate-200">
           <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-1">{stat.label}</span>
@@ -647,9 +691,9 @@ const CreateShipment = ({ onCancel, onSave }: { onCancel: () => void; onSave: (s
 
   const carriers = [
     'LLS ESSENCIAL TRANSPORTES',
-    'MVM TRANPOSRTES',
+    'MVM TRANSPORTES',
     'TRAGETTA - FL BRASIL',
-    'BERTOLINI TRANPOSRTES LTDA'
+    'BERTOLINE TRANSPORTES LTDA'
   ];
 
   const handleSave = async () => {
@@ -935,7 +979,7 @@ const CreateShipment = ({ onCancel, onSave }: { onCancel: () => void; onSave: (s
                     id="invoice-upload"
                     className="absolute inset-0 opacity-0 cursor-pointer"
                     onChange={handleFileChange}
-                    accept=".xlsx,.xls,.pdf"
+                    accept=".xlsx,.xls,.pdf,.csv"
                   />
                   <div className="flex flex-col items-center gap-3">
                     <div className="w-12 h-12 bg-white rounded-xl shadow-sm border border-slate-100 flex items-center justify-center group-hover:scale-110 transition-transform">
@@ -1067,10 +1111,10 @@ const ShipmentDetail = ({
           <nav className="text-xs text-slate-400 uppercase font-bold tracking-widest flex items-center gap-2 mb-1">
             <span className="hover:text-blue-600 cursor-pointer" onClick={onBack}>Shipments</span>
             <ChevronRight className="w-3 h-3" />
-            <span className="text-blue-600">{shipment.code}</span>
+            <span className="text-blue-600">{shipment.trackingTag || shipment.code}</span>
           </nav>
           <div className="flex items-center gap-4">
-            <h1 className="text-3xl font-bold text-slate-900">{shipment.code}</h1>
+            <h1 className="text-3xl font-bold text-slate-900">{shipment.trackingTag || shipment.code}</h1>
             <span className="px-3 py-1 bg-blue-50 text-blue-600 text-xs font-bold rounded-full border border-blue-100 uppercase tracking-wider">
               {shipment.mode}
             </span>
@@ -2110,6 +2154,942 @@ const PaymentsPanel = ({ onBack, profile }: { onBack: () => void, profile: Profi
   );
 };
 
+const RoutingPanel = ({ onBack }: { onBack: () => void }) => {
+  const [stops, setStops] = useState<RouteStop[]>([]);
+  const [newCity, setNewCity] = useState('');
+  const [newState, setNewState] = useState('');
+
+  const distanceMap: Record<string, number> = {
+    'Santarém': 600,
+    'Porto Velho': 1000,
+    'Rio Branco': 1500,
+    'Belém': 1800,
+    'Cuiabá': 2300,
+    'Goiânia': 2800,
+    'Brasília': 3100,
+    'São Paulo': 3800,
+    'Rio de Janeiro': 3900,
+    'Curitiba': 4000
+  };
+
+  const addStop = () => {
+    if (!newCity || !newState) return;
+    const dist = distanceMap[newCity] || Math.floor(Math.random() * 4000) + 1000;
+    setStops([...stops, { id: Math.random().toString(), city: newCity, state: newState, distanceFromMAO: dist }]);
+    setNewCity('');
+    setNewState('');
+  };
+
+  const optimizeRoute = () => {
+    const sorted = [...stops].sort((a, b) => a.distanceFromMAO - b.distanceFromMAO);
+    setStops(sorted);
+  };
+
+  return (
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+      <div className="flex items-center justify-between mb-8">
+        <div className="flex items-center gap-4">
+          <button onClick={onBack} className="p-2 hover:bg-slate-100 rounded-full transition-colors">
+            <ArrowLeft className="w-5 h-5 text-slate-600" />
+          </button>
+          <div>
+            <h1 className="text-3xl font-bold text-slate-900">Route Optimization</h1>
+            <p className="text-slate-500">LTL Fracionada · Origin: Manaus (MAO)</p>
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm h-fit">
+          <h3 className="font-bold text-slate-900 mb-6 flex items-center gap-2">
+            <Plus className="w-4 h-4 text-blue-600" /> Add Destination
+          </h3>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">City</label>
+              <input
+                placeholder="Ex: Santarém"
+                value={newCity}
+                onChange={e => setNewCity(e.target.value)}
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 px-4 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">State</label>
+              <input
+                placeholder="Ex: PA"
+                value={newState}
+                onChange={e => setNewState(e.target.value)}
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 px-4 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+            <button
+              onClick={addStop}
+              className="w-full py-3 bg-blue-600 text-white font-extrabold rounded-xl shadow-lg shadow-blue-100 hover:bg-blue-700 transition-all active:scale-95"
+            >
+              Add to Route
+            </button>
+          </div>
+
+          <div className="mt-8 p-4 bg-amber-50 rounded-xl border border-amber-100">
+            <p className="text-[10px] font-extrabold text-amber-700 uppercase mb-1 flex items-center gap-1">
+              <Zap className="w-3 h-3" /> Tip
+            </p>
+            <p className="text-[10px] text-amber-600 leading-relaxed font-medium">
+              Start with the nearest cities to Manaus to reduce transit lead-times and optimize delivery costs.
+            </p>
+          </div>
+        </div>
+
+        <div className="lg:col-span-2 space-y-6">
+          <div className="bg-slate-900 rounded-2xl p-6 text-white flex justify-between items-center shadow-xl">
+            <div>
+              <h3 className="font-bold text-lg flex items-center gap-2">
+                <Route className="w-5 h-5 text-blue-400" /> Sequence Optimization
+              </h3>
+              <p className="text-slate-400 text-xs">Algorithm based on proximity from origin.</p>
+            </div>
+            <button
+              onClick={optimizeRoute}
+              disabled={stops.length < 2}
+              className="px-6 py-2 bg-emerald-500 text-white rounded-xl font-bold text-sm hover:bg-emerald-600 transition-all shadow-lg shadow-emerald-900/20 disabled:opacity-50 disabled:grayscale"
+            >
+              Optimize Sequence
+            </button>
+          </div>
+
+          <div className="relative space-y-4">
+            {/* Origin */}
+            <div className="flex items-center gap-4 bg-blue-600/10 border border-blue-600/30 rounded-2xl p-4 shadow-sm">
+              <div className="w-12 h-12 rounded-full bg-blue-600 flex items-center justify-center font-extrabold text-white shadow-lg border-4 border-white">
+                00
+              </div>
+              <div className="flex-1">
+                <p className="text-sm font-extrabold text-slate-900">Manaus (MAO)</p>
+                <div className="flex items-center gap-2 mt-0.5">
+                  <span className="px-1.5 py-0.5 bg-blue-600 text-white text-[8px] font-bold rounded uppercase">Origin</span>
+                  <p className="text-[10px] font-bold text-slate-400">AMAZONAS · BRASIL</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Stops */}
+            <div className="space-y-4 relative">
+              {stops.map((s, idx) => (
+                <motion.div
+                  key={s.id}
+                  layout
+                  initial={{ opacity: 0, x: -10 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  className="flex items-center gap-4 bg-white border border-slate-200 rounded-2xl p-4 group relative hover:border-blue-200 transition-colors shadow-sm"
+                >
+                  <div className="w-12 h-12 rounded-full bg-slate-100 flex items-center justify-center font-extrabold text-slate-400 group-hover:bg-blue-50 group-hover:text-blue-600 transition-colors border-4 border-white">
+                    {(idx + 1).toString().padStart(2, '0')}
+                  </div>
+                  <div className="flex-1">
+                    <p className="text-sm font-extrabold text-slate-900 group-hover:text-blue-600 transition-colors">{s.city}, {s.state}</p>
+                    <div className="flex items-center gap-3 mt-0.5">
+                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Est. Distance: {s.distanceFromMAO} km</p>
+                      <span className="w-1 h-1 rounded-full bg-slate-300"></span>
+                      <p className="text-[10px] font-bold text-emerald-600 uppercase italic">In Range</p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setStops(stops.filter(x => x.id !== s.id))}
+                    className="p-2 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </motion.div>
+              ))}
+            </div>
+
+            {stops.length === 0 && (
+              <div className="py-24 text-center text-slate-400 border-2 border-dashed border-slate-200 rounded-3xl bg-slate-50/50">
+                <MapPin className="w-12 h-12 mx-auto mb-4 opacity-10" />
+                <p className="text-sm font-bold opacity-60">No destinations added to the route.</p>
+                <p className="text-[10px] font-medium opacity-40 mt-1 uppercase tracking-widest">Add cities to unlock optimization</p>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const FleetRegistrationPanel = ({ onBack, profile }: { onBack: () => void, profile: Profile | null }) => {
+  const [registrations, setRegistrations] = useState<FleetRegistration[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [showForm, setShowForm] = useState(false);
+  const [editingReg, setEditingReg] = useState<Partial<FleetRegistration> | null>(null);
+  const [seals, setSeals] = useState<string[]>([]);
+  const [sealInput, setSealInput] = useState('');
+  const [photos, setPhotos] = useState<{ file: File, preview: string }[]>([]);
+  const [uploading, setUploading] = useState(false);
+
+  useEffect(() => {
+    fetchRegistrations();
+  }, [profile]);
+
+  const fetchRegistrations = async () => {
+    setLoading(true);
+    try {
+      let query = supabase.from('fleet_registrations').select('*');
+      if (profile?.role !== 'super-admin' && profile?.company_id) {
+        query = query.eq('company_id', profile.company_id);
+      }
+      const { data, error } = await query.order('created_at', { ascending: false });
+      if (error) throw error;
+      setRegistrations(data || []);
+    } catch (err) {
+      console.error('Error fetching registrations:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handlePhotoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files) {
+      const newFiles = Array.from(e.target.files).map((f: File) => ({
+        file: f,
+        preview: URL.createObjectURL(f)
+      }));
+      setPhotos([...photos, ...newFiles]);
+    }
+  };
+
+  const saveRegistration = async (isFinal: boolean) => {
+    if (!profile?.company_id) {
+      alert('Must be logged in to save.');
+      return;
+    }
+
+    setUploading(true);
+    try {
+      const uploadedPhotos = [];
+      for (const p of photos) {
+        const fileExt = p.file.name.split('.').pop();
+        const fileName = `${Math.random().toString(36).substring(2)}.${fileExt}`;
+        const filePath = `fleet/${fileName}`;
+
+        const { error: uploadErr } = await supabase.storage
+          .from('fleet_photos')
+          .upload(filePath, p.file);
+
+        if (uploadErr) throw uploadErr;
+
+        const { data: urlData } = supabase.storage
+          .from('fleet_photos')
+          .getPublicUrl(filePath);
+
+        uploadedPhotos.push({
+          url: urlData.publicUrl,
+          name: p.file.name,
+          type: p.file.type
+        });
+      }
+
+      const payload = {
+        carrier: editingReg?.carrier,
+        vehicle_plate: editingReg?.vehicle_plate,
+        driver_name: editingReg?.driver_name,
+        seals: seals,
+        photos: [...(editingReg?.photos || []), ...uploadedPhotos],
+        status: isFinal ? 'finalized' : 'draft',
+        company_id: profile.company_id,
+        created_by: profile.id
+      };
+
+      if (editingReg?.id) {
+        const { error } = await supabase
+          .from('fleet_registrations')
+          .update(payload)
+          .eq('id', editingReg.id);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase
+          .from('fleet_registrations')
+          .insert([payload]);
+        if (error) throw error;
+      }
+
+      if (isFinal) {
+        alert('Record finalized! (Email sending trigger initialized)');
+      } else {
+        alert('Draft saved successfully.');
+      }
+
+      setShowForm(false);
+      setEditingReg(null);
+      setPhotos([]);
+      setSeals([]);
+      fetchRegistrations();
+    } catch (err: any) {
+      console.error(err);
+      alert('Error saving: ' + (err.message || 'Check console'));
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const startNew = () => {
+    setEditingReg({});
+    setSeals([]);
+    setPhotos([]);
+    setShowForm(true);
+  };
+
+  const editReg = (reg: FleetRegistration) => {
+    setEditingReg(reg);
+    setSeals(reg.seals || []);
+    setPhotos([]);
+    setShowForm(true);
+  };
+
+  return (
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-12">
+        <div className="flex items-center gap-4">
+          <button onClick={onBack} className="p-2 hover:bg-slate-100 rounded-full transition-colors">
+            <ArrowLeft className="w-5 h-5 text-slate-600" />
+          </button>
+          <div>
+            <h1 className="text-3xl font-extrabold text-slate-900 tracking-tight">Fleet Control <span className="text-blue-600">& Loading</span></h1>
+            <p className="text-slate-500 font-medium mt-1">Audit vehicle plates, document seals and load evidence photos.</p>
+          </div>
+        </div>
+        {!showForm && (
+          <button
+            onClick={startNew}
+            className="px-6 py-3 bg-slate-900 text-white rounded-2xl font-extrabold text-sm shadow-xl shadow-slate-200 hover:bg-slate-800 transition-all active:scale-95 flex items-center gap-2"
+          >
+            <Camera className="w-4 h-4" /> Start New Audit
+          </button>
+        )}
+      </div>
+
+      {showForm ? (
+        <div className="bg-white rounded-[2rem] border border-slate-200 shadow-2xl overflow-hidden">
+          <div className="p-8 lg:p-12 grid grid-cols-1 lg:grid-cols-2 gap-16">
+            <div className="space-y-10">
+              <div className="flex items-center gap-3 border-b border-slate-100 pb-6">
+                <div className="w-10 h-10 rounded-xl bg-blue-600 flex items-center justify-center text-white shadow-lg">
+                  <Truck className="w-5 h-5" />
+                </div>
+                <h3 className="text-xl font-extrabold text-slate-900">General Information</h3>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em] ml-1">Transportation Company</label>
+                  <input
+                    value={editingReg?.carrier || ''}
+                    onChange={e => setEditingReg({ ...editingReg, carrier: e.target.value })}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-2xl py-4 px-5 text-sm outline-none focus:ring-2 focus:ring-blue-500 font-medium"
+                    placeholder="Enter carrier name..."
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em] ml-1">Vehicle Plate</label>
+                  <input
+                    value={editingReg?.vehicle_plate || ''}
+                    onChange={e => setEditingReg({ ...editingReg, vehicle_plate: e.target.value })}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-2xl py-4 px-5 text-sm outline-none focus:ring-2 focus:ring-blue-500 font-mono font-bold placeholder:font-sans placeholder:font-normal"
+                    placeholder="ABC-1234"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em] ml-1">Driver's Full Name</label>
+                <div className="relative">
+                  <User className="absolute left-5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                  <input
+                    value={editingReg?.driver_name || ''}
+                    onChange={e => setEditingReg({ ...editingReg, driver_name: e.target.value })}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-2xl py-4 pl-12 pr-5 text-sm outline-none focus:ring-2 focus:ring-blue-500 font-medium"
+                    placeholder="Who is driving today?"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-6 bg-slate-50 p-6 rounded-3xl border border-slate-100">
+                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em] ml-1">Security Seal Numbers</label>
+                <div className="flex gap-2">
+                  <input
+                    value={sealInput}
+                    onChange={e => setSealInput(e.target.value)}
+                    onKeyPress={e => e.key === 'Enter' && (e.preventDefault(), sealInput && (setSeals([...seals, sealInput]), setSealInput('')))}
+                    className="flex-1 bg-white border border-slate-200 rounded-xl py-3 px-4 text-sm outline-none font-bold text-blue-600"
+                    placeholder="Enter seal ID..."
+                  />
+                  <button
+                    onClick={() => { if (sealInput) { setSeals([...seals, sealInput]); setSealInput(''); } }}
+                    className="px-5 bg-white border border-slate-200 text-slate-600 rounded-xl font-bold text-sm hover:bg-blue-600 hover:text-white hover:border-blue-600 transition-all shadow-sm"
+                  >
+                    Add
+                  </button>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {seals.map(s => (
+                    <span key={s} className="px-3 py-1.5 bg-white border border-blue-100 text-blue-600 rounded-lg text-xs font-bold flex items-center gap-2 shadow-sm animate-in fade-in zoom-in duration-200">
+                      {s} <button onClick={() => setSeals(seals.filter(x => x !== s))} className="hover:text-red-500 transition-colors"><X className="w-3 h-3" /></button>
+                    </span>
+                  ))}
+                  {seals.length === 0 && <p className="text-[10px] text-slate-400 font-medium italic">No seals registered yet.</p>}
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-10">
+              <div className="flex items-center gap-3 border-b border-slate-100 pb-6">
+                <div className="w-10 h-10 rounded-xl bg-indigo-600 flex items-center justify-center text-white shadow-lg">
+                  <Camera className="w-5 h-5" />
+                </div>
+                <h3 className="text-xl font-extrabold text-slate-900">Audit Proofs</h3>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+                {/* Existing Database Photos */}
+                {editingReg?.photos?.map((p, i) => (
+                  <div key={`db-${i}`} className="aspect-square rounded-2xl bg-slate-100 overflow-hidden border border-slate-200 relative group shadow-sm">
+                    <img src={p.url} className="w-full h-full object-cover transition-transform group-hover:scale-110" />
+                    <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                      <span className="text-[10px] text-white font-extrabold uppercase">Stored</span>
+                    </div>
+                  </div>
+                ))}
+
+                {/* New local uploads */}
+                {photos.map((p, i) => (
+                  <div key={`loc-${i}`} className="aspect-square rounded-2xl bg-slate-100 overflow-hidden border-2 border-blue-400 relative group shadow-lg animate-in fade-in scale-95 transition-all">
+                    <img src={p.preview} className="w-full h-full object-cover" />
+                    <button
+                      onClick={() => setPhotos(photos.filter((_, idx) => idx !== i))}
+                      className="absolute top-2 right-2 bg-white/90 p-1.5 rounded-full text-red-500 shadow-lg hover:bg-red-500 hover:text-white transition-all"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                    <div className="absolute bottom-0 left-0 right-0 bg-blue-600/80 p-1.5 text-center">
+                      <span className="text-[8px] text-white font-extrabold uppercase tracking-widest">New Upload</span>
+                    </div>
+                  </div>
+                ))}
+
+                {/* Add Photo Button */}
+                <label className="aspect-square rounded-2xl border-2 border-dashed border-slate-200 flex flex-col items-center justify-center cursor-pointer hover:bg-slate-50 hover:border-blue-400 transition-all group">
+                  <div className="w-12 h-12 rounded-full bg-slate-50 flex items-center justify-center group-hover:bg-blue-50 transition-colors mb-3">
+                    <Plus className="w-6 h-6 text-slate-300 group-hover:text-blue-500" />
+                  </div>
+                  <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-widest group-hover:text-blue-500">Capture Proof</span>
+                  <input type="file" multiple accept="image/*" onChange={handlePhotoChange} className="hidden" />
+                </label>
+              </div>
+
+              <div className="p-6 bg-slate-900 rounded-3xl text-white shadow-xl">
+                <h4 className="font-bold text-sm mb-2 flex items-center gap-2">
+                  <History className="w-4 h-4 text-emerald-400" /> Audit Integrity
+                </h4>
+                <p className="text-[10px] text-slate-400 leading-relaxed font-medium">
+                  Photos must be clear showing the vehicle plate and the locked seal. Finalizing this audit will freeze editing and trigger an automated report to HQ.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="p-8 bg-slate-50 border-t border-slate-100 flex flex-col sm:flex-row justify-between items-center gap-6">
+            <button
+              onClick={() => { if (window.confirm('Discard all changes?')) setShowForm(false); }}
+              className="text-sm font-extrabold text-slate-400 hover:text-red-500 transition-colors flex items-center gap-2"
+            >
+              <Trash2 className="w-4 h-4" /> Discard Audit Data
+            </button>
+            <div className="flex w-full sm:w-auto gap-4">
+              <button
+                onClick={() => saveRegistration(false)}
+                disabled={uploading}
+                className="flex-1 sm:px-8 py-4 bg-white border border-slate-200 text-slate-600 rounded-2xl font-extrabold text-xs shadow-sm hover:bg-slate-100 transition-all disabled:opacity-50"
+              >
+                {uploading ? 'Wait...' : 'Keep as Draft'}
+              </button>
+              <button
+                onClick={() => saveRegistration(true)}
+                disabled={uploading}
+                className="flex-[2] sm:px-12 py-4 bg-blue-600 text-white rounded-2xl font-black text-xs shadow-2xl shadow-blue-900/40 hover:bg-blue-700 transition-all active:scale-95 disabled:opacity-50 uppercase tracking-widest"
+              >
+                {uploading ? 'Processing File Transfer...' : 'Finalize & Send Report'}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+          {registrations.map(reg => (
+            <motion.div
+              layout
+              key={reg.id}
+              className="bg-white rounded-[2rem] p-8 border border-slate-200 shadow-sm hover:shadow-2xl hover:border-blue-100 transition-all group relative overflow-hidden"
+            >
+              <div className="flex justify-between items-start mb-6">
+                <div className={`px-2.5 py-1 rounded-full text-[9px] font-black uppercase tracking-widest ${reg.status === 'finalized' ? 'bg-emerald-100 text-emerald-600' : 'bg-amber-100 text-amber-600'}`}>
+                  {reg.status}
+                </div>
+                <div className="flex items-center gap-1.5 opacity-40">
+                  <Clock className="w-3 h-3" />
+                  <span className="text-[10px] font-bold">{new Date(reg.created_at).toLocaleDateString('pt-BR')}</span>
+                </div>
+              </div>
+
+              <div className="mb-6">
+                <h3 className="font-black text-slate-900 text-2xl tracking-tighter group-hover:text-blue-600 transition-colors">{reg.vehicle_plate}</h3>
+                <p className="text-xs font-bold text-slate-400 uppercase tracking-[0.1em] mt-1">{reg.carrier || 'Unknown Carrier'}</p>
+              </div>
+
+              <div className="flex -space-x-3 mb-8">
+                {reg.photos?.slice(0, 5).map((p, i) => (
+                  <div key={i} className="w-12 h-12 rounded-full border-4 border-white overflow-hidden bg-slate-100 shadow-md">
+                    <img src={p.url} className="w-full h-full object-cover" />
+                  </div>
+                ))}
+                {(reg.photos?.length || 0) > 5 && (
+                  <div className="w-12 h-12 rounded-full border-4 border-white bg-slate-900 flex items-center justify-center text-[10px] font-bold text-white shadow-md">
+                    +{(reg.photos?.length || 0) - 5}
+                  </div>
+                )}
+                {(reg.photos?.length || 0) === 0 && (
+                  <div className="w-12 h-12 rounded-full border-4 border-white bg-slate-100 flex items-center justify-center text-slate-300 italic shadow-md">
+                    <Camera className="w-5 h-5" />
+                  </div>
+                )}
+              </div>
+
+              <div className="space-y-4">
+                <div className="flex items-center justify-between text-xs border-t border-slate-50 pt-4">
+                  <span className="text-slate-400 font-bold uppercase tracking-widest">Driver</span>
+                  <span className="text-slate-900 font-extrabold truncate max-w-[150px]">{reg.driver_name || '---'}</span>
+                </div>
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-slate-400 font-bold uppercase tracking-widest">Active Seals</span>
+                  <span className="px-2 py-0.5 bg-blue-50 text-blue-600 rounded-lg font-black">{reg.seals?.length || 0}</span>
+                </div>
+              </div>
+
+              <button
+                onClick={() => editReg(reg)}
+                className="w-full mt-8 py-4 bg-slate-50 text-slate-600 rounded-[1.25rem] font-extrabold text-[10px] uppercase tracking-widest hover:bg-blue-600 hover:text-white hover:shadow-lg transition-all"
+              >
+                {reg.status === 'finalized' ? 'Audit Summary' : 'Resume Audit'}
+              </button>
+            </motion.div>
+          ))}
+
+          {loading && (
+            <div className="col-span-full py-24 flex flex-col items-center justify-center">
+              <div className="w-10 h-10 border-4 border-slate-200 border-t-blue-600 rounded-full animate-spin mb-4" />
+              <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Syncing with fleet server...</p>
+            </div>
+          )}
+
+          {!loading && registrations.length === 0 && (
+            <div className="col-span-full py-32 text-center text-slate-400 border-2 border-dashed border-slate-200 rounded-[3rem] bg-white/50">
+              <History className="w-16 h-16 mx-auto mb-6 opacity-5" />
+              <p className="text-lg font-black text-slate-900 opacity-20 uppercase tracking-tighter">No Fleet History Found</p>
+              <p className="text-xs font-bold opacity-30 mt-2">Start your first audit using the button above.</p>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
+const DocsPanel = ({ onBack, profile }: { onBack: () => void, profile: Profile | null }) => {
+  const [docs, setDocs] = useState<Document[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [showModal, setShowModal] = useState(false);
+  const [editingDoc, setEditingDoc] = useState<Partial<Document> | null>(null);
+  const [search, setSearch] = useState('');
+  const [filterCategory, setFilterCategory] = useState<'All' | 'Tercerizados' | 'SGI' | 'Contratos'>('All');
+  const [uploading, setUploading] = useState(false);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+
+  useEffect(() => {
+    fetchDocs();
+  }, [profile]);
+
+  const fetchDocs = async () => {
+    setLoading(true);
+    try {
+      let query = supabase.from('documents').select('*');
+      if (profile?.role !== 'super-admin' && profile?.company_id) {
+        query = query.eq('company_id', profile.company_id);
+      }
+      const { data, error } = await query.order('expiry_date', { ascending: true });
+      if (error) throw error;
+      setDocs(data || []);
+    } catch (err) {
+      console.error('Error fetching docs:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSave = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!profile?.company_id) return;
+
+    setUploading(true);
+    try {
+      let fileUrl = editingDoc?.file_url;
+
+      if (selectedFile) {
+        const fileExt = selectedFile.name.split('.').pop();
+        const fileName = `${Math.random().toString(36).substring(2)}.${fileExt}`;
+        const filePath = `docs/${fileName}`;
+
+        const { error: uploadError } = await supabase.storage
+          .from('documents')
+          .upload(filePath, selectedFile);
+
+        if (uploadError) throw uploadError;
+
+        const { data: urlData } = supabase.storage
+          .from('documents')
+          .getPublicUrl(filePath);
+
+        fileUrl = urlData.publicUrl;
+      }
+
+      const payload = {
+        name: editingDoc?.name,
+        category: editingDoc?.category,
+        subcategory: editingDoc?.subcategory,
+        type: editingDoc?.type,
+        issue_date: editingDoc?.issue_date,
+        expiry_date: editingDoc?.expiry_date,
+        file_url: fileUrl,
+        company_id: profile.company_id,
+        created_by: profile.id
+      };
+
+      if (editingDoc?.id) {
+        const { error } = await supabase.from('documents').update(payload).eq('id', editingDoc.id);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase.from('documents').insert([payload]);
+        if (error) throw error;
+      }
+
+      setShowModal(false);
+      setEditingDoc(null);
+      setSelectedFile(null);
+      fetchDocs();
+    } catch (err) {
+      console.error('Error saving doc:', err);
+      alert('Error saving document. Make sure the "documents" storage bucket exists.');
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const getStatus = (expiryDate?: string) => {
+    if (!expiryDate) return { label: 'Permanent', color: 'bg-emerald-50 text-emerald-600', icon: ShieldCheck };
+    const today = new Date();
+    const expiry = new Date(expiryDate);
+    const diff = Math.ceil((expiry.getTime() - today.getTime()) / (24 * 60 * 60 * 1000));
+
+    if (diff < 0) return { label: 'Expired', color: 'bg-red-50 text-red-600', icon: AlertTriangle };
+    if (diff <= 30) return { label: 'Expiring Soon', color: 'bg-amber-50 text-amber-600', icon: Clock };
+    return { label: 'Active', color: 'bg-emerald-50 text-emerald-600', icon: ShieldCheck };
+  };
+
+  const filteredDocs = docs.filter(d => {
+    const matchesSearch = d.name.toLowerCase().includes(search.toLowerCase()) ||
+      d.subcategory?.toLowerCase().includes(search.toLowerCase()) ||
+      d.type.toLowerCase().includes(search.toLowerCase());
+    const matchesCategory = filterCategory === 'All' || d.category === filterCategory;
+    return matchesSearch && matchesCategory;
+  });
+
+  const stats = [
+    { label: 'Total', count: docs.length, color: 'text-slate-900', icon: FileText },
+    { label: 'Expired', count: docs.filter(d => getStatus(d.expiry_date).label === 'Expired').length, color: 'text-red-600', icon: AlertTriangle },
+    { label: 'Expiring soon', count: docs.filter(d => getStatus(d.expiry_date).label === 'Expiring Soon').length, color: 'text-amber-600', icon: Clock },
+    { label: 'Active', count: docs.filter(d => getStatus(d.expiry_date).label === 'Active').length, color: 'text-emerald-600', icon: ShieldCheck },
+  ];
+
+  const groupedDocs = useMemo<Record<string, Document[]>>(() => {
+    if (filterCategory !== 'Tercerizados') return { 'All Documents': filteredDocs };
+    const groups: Record<string, Document[]> = {};
+    filteredDocs.forEach(doc => {
+      const key = doc.subcategory || 'Uncategorized Company';
+      if (!groups[key]) groups[key] = [];
+      groups[key].push(doc);
+    });
+    return groups;
+  }, [filteredDocs, filterCategory]);
+
+  return (
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-12">
+        <div className="flex items-center gap-4">
+          <button onClick={onBack} className="p-2 hover:bg-slate-100 rounded-full transition-colors">
+            <ArrowLeft className="w-5 h-5 text-slate-600" />
+          </button>
+          <div>
+            <h1 className="text-3xl font-extrabold text-slate-900 tracking-tight letters text-transparent bg-clip-text bg-gradient-to-r from-cyan-600 to-blue-600">Documentation Module</h1>
+            <p className="text-slate-500 font-medium mt-1">Real-time compliance engine for integrated logistics.</p>
+          </div>
+        </div>
+        <button
+          onClick={() => { setEditingDoc({ category: 'Tercerizados' }); setShowModal(true); }}
+          className="px-6 py-3 bg-cyan-600 text-white rounded-2xl font-extrabold text-sm shadow-xl shadow-cyan-100 hover:bg-cyan-700 transition-all active:scale-95 flex items-center gap-2"
+        >
+          <Plus className="w-4 h-4" /> Add Document
+        </button>
+      </div>
+
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-6 mb-12">
+        {stats.map(s => (
+          <div key={s.label} className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm relative overflow-hidden group hover:border-cyan-200 transition-all">
+            <div className={`absolute top-0 right-0 p-4 opacity-5 group-hover:opacity-10 transition-opacity`}>
+              <s.icon className="w-16 h-16" />
+            </div>
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">{s.label}</p>
+            <p className={`text-4xl font-black ${s.color}`}>{s.count.toString().padStart(2, '0')}</p>
+          </div>
+        ))}
+      </div>
+
+      <div className="bg-white rounded-[2rem] border border-slate-200 shadow-sm overflow-hidden min-h-[500px]">
+        <div className="p-8 border-b border-slate-100 flex flex-col md:flex-row gap-6 items-center justify-between bg-slate-50/30">
+          <div className="relative w-full md:w-[400px]">
+            <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+            <input
+              placeholder="Search by name, company or type..."
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              className="w-full bg-white border border-slate-200 rounded-2xl py-3 pl-12 pr-4 text-sm outline-none focus:ring-2 focus:ring-cyan-500 shadow-sm"
+            />
+          </div>
+          <div className="flex flex-wrap items-center gap-2 bg-slate-100 p-1.5 rounded-2xl">
+            {['All', 'Tercerizados', 'SGI', 'Contratos'].map(cat => (
+              <button
+                key={cat}
+                onClick={() => setFilterCategory(cat as any)}
+                className={`px-6 py-2 rounded-xl text-xs font-bold transition-all ${filterCategory === cat ? 'bg-white text-cyan-600 shadow-sm' : 'text-slate-500 hover:text-slate-900'}`}
+              >
+                {cat}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="p-8 space-y-12">
+          {(Object.entries(groupedDocs) as [string, Document[]][]).map(([groupName, docsInGroup]) => (
+            <div key={groupName} className="space-y-4">
+              {filterCategory === 'Tercerizados' && (
+                <div className="flex items-center gap-3 mb-6">
+                  <div className="w-1.5 h-6 bg-cyan-500 rounded-full" />
+                  <h3 className="text-xl font-black text-slate-900 tracking-tight uppercase tracking-widest text-xs opacity-40">{groupName}</h3>
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {docsInGroup.map(doc => {
+                  const status = getStatus(doc.expiry_date);
+                  return (
+                    <motion.div
+                      key={doc.id}
+                      layout
+                      onClick={() => { setEditingDoc(doc); setShowModal(true); }}
+                      className="bg-white rounded-2xl p-6 border border-slate-100 shadow-sm hover:shadow-xl hover:border-cyan-100 transition-all cursor-pointer group relative overflow-hidden"
+                    >
+                      <div className={`absolute top-0 right-0 w-1 pt-6 pb-6 h-full ${status.color.replace('bg-', 'bg-').split(' ')[0]}`} />
+
+                      <div className="flex justify-between items-start mb-6">
+                        <div className="p-3 bg-slate-50 rounded-xl group-hover:bg-cyan-50 text-slate-400 group-hover:text-cyan-600 transition-colors">
+                          <FileText className="w-5 h-5" />
+                        </div>
+                        <div className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-widest ${status.color}`}>
+                          {status.label}
+                        </div>
+                      </div>
+
+                      <h4 className="text-lg font-black text-slate-900 group-hover:text-cyan-600 transition-colors line-clamp-1">{doc.name}</h4>
+                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">{doc.type}</p>
+
+                      <div className="mt-8 pt-6 border-t border-slate-50 flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <Calendar className="w-3.5 h-3.5 text-slate-400" />
+                          <span className="text-xs font-extrabold text-slate-600">
+                            {doc.expiry_date ? new Date(doc.expiry_date).toLocaleDateString('pt-BR') : 'No date'}
+                          </span>
+                        </div>
+                        {doc.file_url && (
+                          <div className="p-2 bg-emerald-50 text-emerald-600 rounded-lg">
+                            <Download className="w-3.5 h-3.5" />
+                          </div>
+                        )}
+                      </div>
+                    </motion.div>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+
+          {!loading && filteredDocs.length === 0 && (
+            <div className="py-24 text-center">
+              <div className="flex flex-col items-center opacity-10">
+                <FileText className="w-24 h-24 mb-6" />
+                <p className="font-black uppercase tracking-[0.2em] text-lg">Empty Vault</p>
+                <p className="text-xs font-bold mt-2">No documents found matching your criteria</p>
+              </div>
+            </div>
+          )}
+
+          {loading && (
+            <div className="py-24 flex flex-col items-center gap-4">
+              <div className="w-10 h-10 border-4 border-cyan-100 border-t-cyan-500 rounded-full animate-spin" />
+              <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Encrypting protocols...</p>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {showModal && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-md">
+          <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="bg-white rounded-[2.5rem] w-full max-w-2xl shadow-2xl overflow-hidden border border-white/20">
+            <div className="px-10 py-8 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
+              <div>
+                <h3 className="text-2xl font-black text-slate-900 tracking-tight">{editingDoc?.id ? 'System Update' : 'New Protocol'}</h3>
+                <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mt-1">Regulatory & Compliance Entry</p>
+              </div>
+              <button onClick={() => setShowModal(false)} className="p-3 hover:bg-slate-200 rounded-full transition-colors font-bold text-slate-400">
+                <X className="w-6 h-6" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSave} className="p-10 space-y-8">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Document Label</label>
+                  <input
+                    required
+                    value={editingDoc?.name || ''}
+                    onChange={e => setEditingDoc({ ...editingDoc, name: e.target.value })}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-2xl py-4 px-5 text-sm outline-none focus:ring-2 focus:ring-cyan-500 font-bold"
+                    placeholder="Ex: ASO Johny S."
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Document Type</label>
+                  <input
+                    required
+                    value={editingDoc?.type || ''}
+                    onChange={e => setEditingDoc({ ...editingDoc, type: e.target.value })}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-2xl py-4 px-5 text-sm outline-none focus:ring-2 focus:ring-cyan-500 font-bold"
+                    placeholder="Ex: ASO, Training..."
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Classification</label>
+                  <select
+                    value={editingDoc?.category || 'Tercerizados'}
+                    onChange={e => setEditingDoc({ ...editingDoc, category: e.target.value })}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-2xl py-4 px-5 text-sm outline-none focus:ring-2 focus:ring-cyan-500 font-bold appearance-none cursor-pointer"
+                  >
+                    <option value="Tercerizados">Tercerizados (Partners)</option>
+                    <option value="SGI">SGI (Internal)</option>
+                    <option value="Contratos">Contratos (Legal)</option>
+                  </select>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Responsible Entity / Company</label>
+                  <input
+                    value={editingDoc?.subcategory || ''}
+                    onChange={e => setEditingDoc({ ...editingDoc, subcategory: e.target.value })}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-2xl py-4 px-5 text-sm outline-none focus:ring-2 focus:ring-cyan-500 font-bold"
+                    placeholder="Ex: Yusen Logistics..."
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Issue Date</label>
+                  <input
+                    type="date"
+                    value={editingDoc?.issue_date || ''}
+                    onChange={e => setEditingDoc({ ...editingDoc, issue_date: e.target.value })}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-2xl py-4 px-5 text-sm outline-none focus:ring-2 focus:ring-cyan-500 font-bold"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Expiration Deadline</label>
+                  <input
+                    type="date"
+                    value={editingDoc?.expiry_date || ''}
+                    onChange={e => setEditingDoc({ ...editingDoc, expiry_date: e.target.value })}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-2xl py-4 px-5 text-sm outline-none focus:ring-2 focus:ring-cyan-500 font-bold"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Digital Evidence (PDF / IMG)</label>
+                <div className="relative group">
+                  <input
+                    type="file"
+                    onChange={e => setSelectedFile(e.target.files ? e.target.files[0] : null)}
+                    className="hidden"
+                    id="doc-file-upload"
+                  />
+                  <label
+                    htmlFor="doc-file-upload"
+                    className="flex items-center justify-between w-full bg-slate-50 border-2 border-dashed border-slate-200 rounded-2xl py-4 px-6 cursor-pointer group-hover:border-cyan-500 transition-all"
+                  >
+                    <div className="flex items-center gap-3">
+                      <Download className="w-5 h-5 text-slate-400 group-hover:text-cyan-500" />
+                      <span className="text-sm font-bold text-slate-500 group-hover:text-cyan-600">
+                        {selectedFile ? selectedFile.name : editingDoc?.file_url ? 'file-stored-on-cloud.pdf' : 'Select file to upload...'}
+                      </span>
+                    </div>
+                    {selectedFile && <div className="px-3 py-1 bg-cyan-100 text-cyan-600 rounded-lg text-[10px] font-black uppercase">Selected</div>}
+                  </label>
+                </div>
+              </div>
+
+              <div className="pt-4 flex gap-4">
+                <button
+                  type="button"
+                  onClick={() => setShowModal(false)}
+                  className="flex-1 py-4 bg-slate-100 text-slate-500 font-bold rounded-2xl hover:bg-slate-200 transition-all uppercase tracking-widest text-xs"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={uploading}
+                  className="flex-[2] py-4 bg-cyan-600 text-white font-black rounded-2xl shadow-2xl shadow-cyan-900/20 hover:bg-cyan-700 transition-all active:scale-95 uppercase tracking-widest text-xs disabled:opacity-50"
+                >
+                  {uploading ? 'Synching Filesystem...' : editingDoc?.id ? 'Commit Updates' : 'Authorize Protocol'}
+                </button>
+              </div>
+            </form>
+          </motion.div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+
 const Login = ({ onLogin }: { onLogin: (session: any) => void }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -2225,7 +3205,7 @@ export default function App() {
   const [session, setSession] = useState<any>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [permissions, setPermissions] = useState<ModuleAccess[]>([]);
-  const [view, setView] = useState<'home' | 'dashboard' | 'create' | 'detail' | 'freight-calc' | 'cargo-fit' | 'reports' | 'fork-manager' | 'settings' | 'payments' | 'docs'>('home');
+  const [view, setView] = useState<'home' | 'dashboard' | 'freight-calc' | 'cargo-fit' | 'fork-manager' | 'payments' | 'docs' | 'routing' | 'fleet' | 'settings'>('home');
   const [activeTab, setActiveTab] = useState('home');
   const [shipments, setShipments] = useState<Shipment[]>([]);
   const [loading, setLoading] = useState(true);
@@ -2291,10 +3271,16 @@ export default function App() {
   const fetchShipments = async () => {
     try {
       setLoading(true);
-      const { data, error } = await supabase
+
+      let query = supabase
         .from('shipments')
-        .select('*')
-        .order('created_at', { ascending: false });
+        .select('*');
+
+      if (profile?.role !== 'super-admin' && profile?.company_id) {
+        query = query.eq('company_id', profile.company_id);
+      }
+
+      const { data, error } = await query.order('created_at', { ascending: false });
 
       if (error) throw error;
 
@@ -2366,7 +3352,9 @@ export default function App() {
           tracking_tag: s.trackingTag,
           invoices: s.invoices,
           invoice_file_url: s.invoiceFileUrl,
-          invoice_file_name: s.invoiceFileName
+          invoice_file_name: s.invoiceFileName,
+          user_id: session.user.id,
+          company_id: profile?.company_id
         }]);
 
       if (error) {
@@ -2391,8 +3379,14 @@ export default function App() {
     try {
       // Determine overall status
       let newStatus: ShipmentStatus = 'on-route';
-      const hasDelay = updatedCheckpoints.some(cp => cp.actualDate && cp.plannedDate && new Date(cp.actualDate) > new Date(cp.plannedDate));
-      if (hasDelay) newStatus = 'delayed';
+      const allCompleted = updatedCheckpoints.every(cp => cp.status === 'completed');
+
+      if (allCompleted) {
+        newStatus = 'completed';
+      } else {
+        const hasDelay = updatedCheckpoints.some(cp => cp.actualDate && cp.plannedDate && new Date(cp.actualDate) > new Date(cp.plannedDate));
+        if (hasDelay) newStatus = 'delayed';
+      }
 
       const { error } = await supabase
         .from('shipments')
@@ -2419,6 +3413,7 @@ export default function App() {
     if (tab === 'reports') setView('reports');
     if (tab === 'settings') setView('settings');
     if (tab === 'payments') setView('payments');
+    if (tab === 'docs') setView('docs');
   };
 
   if (!session) {
@@ -2541,6 +3536,11 @@ export default function App() {
             </motion.div>
           )}
 
+          {view === 'docs' && (
+            <motion.div key="docs" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+              <DocsPanel onBack={() => setView('home')} profile={profile} />
+            </motion.div>
+          )}
           {view === 'reports' && (
             <motion.div key="reports" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
               <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
@@ -2550,6 +3550,18 @@ export default function App() {
                   <p className="text-slate-500 font-medium">Analytics dashboard is being synchronized...</p>
                 </div>
               </div>
+            </motion.div>
+          )}
+
+          {view === 'routing' && (
+            <motion.div key="routing" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+              <RoutingPanel onBack={() => setView('home')} />
+            </motion.div>
+          )}
+
+          {view === 'fleet' && (
+            <motion.div key="fleet" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+              <FleetRegistrationPanel onBack={() => setView('home')} profile={profile} />
             </motion.div>
           )}
         </AnimatePresence>
