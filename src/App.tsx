@@ -44,7 +44,11 @@ import {
   Camera,
   Route,
   History,
-  X
+  X,
+  MessageSquare,
+  Bot,
+  Send,
+  Sparkles
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -297,16 +301,43 @@ const Header = ({ activeTab, onTabChange, profile, permissions }: { activeTab: s
   </header>
 );
 
-const MainPanel = ({ onNavigate, profile, permissions }: { onNavigate: (view: any) => void, profile: Profile | null, permissions: ModuleAccess[] }) => {
+const MainPanel = ({ onNavigate, profile, permissions, shipments }: { onNavigate: (view: any) => void, profile: Profile | null, permissions: ModuleAccess[], shipments: Shipment[] }) => {
+  const [payments, setPayments] = useState<Payment[]>([]);
+  const [docs, setDocs] = useState<Document[]>([]);
+  const [chatMsg, setChatMsg] = useState('');
+  const [isMenuExpanded, setIsMenuExpanded] = useState(false);
+  const [isRightMenuExpanded, setIsRightMenuExpanded] = useState(false);
+  const [chatHistory, setChatHistory] = useState([
+    { role: 'ai', msg: 'Oi! Sou a Pam. Como posso analisar sua operação hoje?' }
+  ]);
+
+  useEffect(() => {
+    const fetchStats = async () => {
+      let qPay = supabase.from('payments').select('*');
+      let qDoc = supabase.from('documents').select('*');
+      
+      if (profile?.role !== 'super-admin' && profile?.company_id) {
+         qPay = qPay.eq('company_id', profile.company_id);
+         qDoc = qDoc.eq('company_id', profile.company_id);
+      }
+
+      const [resPay, resDoc] = await Promise.all([qPay, qDoc]);
+      if (resPay.data) setPayments(resPay.data);
+      if (resDoc.data) setDocs(resDoc.data);
+    };
+    if (profile) fetchStats();
+  }, [profile]);
+
+  // Combined module & updated FreightCalc
   const modules = [
-    { id: 'dashboard', title: 'Shipments', desc: 'Real-time tracking & delay alerts', icon: Truck, color: 'bg-blue-600', status: 'Active' },
-    { id: 'freight-calc', title: 'FreightCalc', desc: 'Simulator & performance ranking', icon: Calculator, color: 'bg-emerald-600', status: 'Beta' },
-    { id: 'cargo-fit', title: 'CargoFit', desc: 'Trailer occupation & optimization', icon: Box, color: 'bg-amber-600', status: 'Coming Soon' },
-    { id: 'fork-manager', title: 'ForkManager', desc: 'Fleet maintenance & OS control', icon: Zap, color: 'bg-orange-600', status: 'Coming Soon' },
-    { id: 'payments', title: 'Payments', desc: 'Invoices, slips & financial management', icon: CreditCard, color: 'bg-rose-600', status: 'Active' },
-    { id: 'docs', title: 'Documents', desc: 'ISO, SGI, ASO & contract tracking', icon: ShieldCheck, color: 'bg-cyan-600', status: 'New' },
-    { id: 'routing', title: 'Route Optimization', desc: 'LTL routing starting from MAO', icon: MapPin, color: 'bg-indigo-600', status: 'New' },
-    { id: 'fleet', title: 'Fleet Registration', desc: 'Vehicle & photo loading control', icon: Camera, color: 'bg-slate-700', status: 'New' },
+    { id: 'pam', title: 'Pam AI', desc: 'Assistente Inteligente', icon: Sparkles, color: 'bg-orange-50 text-orange-600', status: 'Active' },
+    { id: 'dashboard', title: 'Shipments', desc: 'Operational overview', icon: Truck, color: 'bg-emerald-50 text-emerald-600', status: 'Active' },
+    { id: 'routing', title: 'CargoFit / Routing', desc: 'Trailer occupation', icon: Route, color: 'bg-indigo-50 text-indigo-600', status: 'New' },
+    { id: 'freight-calc', title: 'Freight Control', desc: 'Cost optimization', icon: Calculator, color: 'bg-amber-50 text-amber-600', status: 'Static', noClick: true },
+    { id: 'fork-manager', title: 'ForkManager', desc: 'Fleet maintenance', icon: Zap, color: 'bg-orange-50 text-orange-600', status: 'Active' },
+    { id: 'payments', title: 'Payments', desc: 'Invoices & slips', icon: CreditCard, color: 'bg-rose-50 text-rose-600', status: 'Active' },
+    { id: 'docs', title: 'Documents', desc: 'SGI & contracts', icon: ShieldCheck, color: 'bg-cyan-50 text-cyan-600', status: 'Active' },
+    { id: 'fleet', title: 'Fleet Registry', desc: 'Vehicle loading', icon: Camera, color: 'bg-slate-100 text-slate-600', status: 'Active' },
   ];
 
   const hasAccess = (modId: string) => {
@@ -314,75 +345,327 @@ const MainPanel = ({ onNavigate, profile, permissions }: { onNavigate: (view: an
     return permissions.some(p => p.module_id === modId);
   };
 
-  const getPermType = (modId: string) => {
-    if (profile?.role === 'super-admin') return 'edit';
-    return permissions.find(p => p.module_id === modId)?.permission_type || null;
+  // KPI Calculations
+  const activeShipments = shipments.filter(s => s.status === 'on-route' || s.status === 'pending').length;
+  const delayedShipments = shipments.filter(s => getTransitMetrics(s).delayDays > 0);
+  
+  // parse numeric value from cargo string like "R$ 4.250,00"
+  let totalFreight = 0;
+  shipments.forEach(s => {
+    const numericStr = s.value.replace(/[^0-9,.-]/g, '').replace(/\./g, '').replace(',', '.');
+    const val = parseFloat(numericStr);
+    if (!isNaN(val)) totalFreight += val;
+  });
+  const avgFreight = shipments.length > 0 ? (totalFreight / shipments.length) : 0;
+
+  const pendingPayments = payments.filter(p => p.status === 'pending');
+  const pendingPaymentsValue = pendingPayments.reduce((acc, p) => acc + p.amount, 0);
+
+  const today = new Date();
+  const warningDate = new Date();
+  warningDate.setDate(today.getDate() + 30);
+  
+  const expiredDocs = docs.filter(d => d.expiry_date && new Date(d.expiry_date) < today).length;
+  const expiringDocs = docs.filter(d => d.expiry_date && new Date(d.expiry_date) >= today && new Date(d.expiry_date) <= warningDate).length;
+
+  const handleSendChat = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!chatMsg.trim()) return;
+    setChatHistory([...chatHistory, { role: 'user', msg: chatMsg }, { role: 'ai', msg: 'Anotado. Estou analisando seus dados, mas como sou uma IA demonstrativa, ainda não efetuo alterações profundas na sua base.' }]);
+    setChatMsg('');
   };
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
-      <div className="mb-12 flex flex-col md:flex-row md:items-end justify-between gap-6">
-        <div>
-          <h1 className="text-4xl font-extrabold text-slate-900 tracking-tight">CargoTrack <span className="text-blue-600">Pro</span></h1>
-          <p className="text-slate-500 mt-2 text-lg">Integrated Logistics Suite for Modern Supply Chain Management.</p>
-        </div>
-        <div className="flex items-center gap-2 bg-blue-50 px-4 py-2 rounded-xl text-blue-700 font-bold text-xs">
-          <ShieldCheck className="w-4 h-4" /> Global Control Enabled ({profile?.role})
+    <div className="bg-[#fafafa] min-h-[calc(100vh-64px)] w-full flex relative overflow-hidden text-slate-800 font-sans">
+      
+      {/* EXPANDABLE LEFT MENU */}
+      <div 
+        className={`${isMenuExpanded ? 'w-64' : 'w-20'} transition-all duration-300 ease-in-out bg-white border-r border-slate-100 shadow-[2px_0_15px_rgba(0,0,0,0.02)] flex flex-col items-center py-6 shrink-0 z-10 relative`}
+      >
+        <button 
+          onClick={() => setIsMenuExpanded(!isMenuExpanded)}
+          className="w-10 h-10 mb-8 rounded-2xl bg-orange-50 text-orange-600 flex items-center justify-center hover:bg-orange-100 transition-colors cursor-pointer"
+        >
+          <Package className="w-5 h-5" />
+        </button>
+
+        <div className="flex flex-col gap-2 w-full px-3">
+          {modules.map((m) => {
+            const locked = !hasAccess(m.id);
+            return (
+              <button
+                key={m.id}
+                onClick={() => {
+                  if (!locked && !m.noClick) onNavigate(m.id);
+                }}
+                className={`flex items-center gap-4 w-full p-3 rounded-2xl transition-all cursor-pointer group hover:bg-slate-50
+                  ${locked || m.noClick ? 'opacity-40 grayscale' : ''}`}
+              >
+                <div className="flex items-center justify-center shrink-0 w-8 h-8 transition-transform group-hover:scale-110">
+                  <m.icon className="w-5 h-5 text-slate-400 group-hover:text-orange-500 transition-colors" />
+                </div>
+                <AnimatePresence>
+                  {isMenuExpanded && (
+                    <motion.div 
+                      initial={{ opacity: 0, width: 0 }} 
+                      animate={{ opacity: 1, width: 'auto' }} 
+                      exit={{ opacity: 0, width: 0 }}
+                      className="flex flex-col items-start min-w-0 flex-1 whitespace-nowrap overflow-hidden"
+                    >
+                      <h3 className="text-sm font-semibold text-slate-700 truncate">{m.title}</h3>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </button>
+            )
+          })}
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {modules.map((m) => {
-          const locked = !hasAccess(m.id);
-          const permType = getPermType(m.id);
-
-          return (
-            <motion.div
-              key={m.id}
-              whileHover={!locked ? { y: -5, scale: 1.01 } : {}}
-              onClick={() => !locked && onNavigate(m.id)}
-              className={`bg-white rounded-2xl p-6 border border-slate-200 shadow-sm transition-all relative overflow-hidden group 
-              ${locked ? 'cursor-not-allowed grayscale' : 'cursor-pointer hover:shadow-lg hover:border-blue-100'} 
-              flex items-center gap-6 h-32`}
-            >
-              <div className={`w-16 h-16 shrink-0 ${locked ? 'bg-slate-200' : m.color} rounded-xl flex items-center justify-center shadow-md transition-transform ${!locked && 'group-hover:scale-110'}`}>
-                <m.icon className={`w-8 h-8 ${locked ? 'text-slate-400' : 'text-white'}`} />
+      {/* MIDDLE DASHBOARD */}
+      <div className="flex-1 overflow-y-auto p-4 sm:p-8 custom-scrollbar relative">
+         <div className="max-w-6xl mx-auto pb-24">
+            <h1 className="text-2xl font-semibold mb-6 text-slate-800 tracking-tight">Visão Geral <span className="text-slate-400 text-sm ml-2 font-normal">Métricas consolidadas</span></h1>
+            
+            {/* KPI Row */}
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+              <div className="bg-white rounded-3xl p-6 border border-slate-100 shadow-[0_2px_15px_rgba(0,0,0,0.015)] hover:shadow-[0_8px_30px_rgba(0,0,0,0.04)] transition-shadow">
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2 flex justify-between">
+                  Embarques <Truck className="w-3 h-3" />
+                </p>
+                <div className="flex items-end gap-3">
+                  <span className="text-4xl font-bold text-emerald-500">{activeShipments}</span>
+                  <span className="text-xs text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full font-semibold mb-1">Ativos</span>
+                </div>
               </div>
 
-              <div className="flex-1">
-                <div className="flex items-center justify-between mb-1">
-                  <h3 className="text-lg font-bold text-slate-900">{m.title}</h3>
-                  <span className={`px-2 py-0.5 rounded-full text-[8px] font-bold uppercase tracking-widest ${locked ? 'bg-slate-100 text-slate-400' :
-                    m.status === 'Active' ? 'bg-blue-50 text-blue-600' : 'bg-emerald-50 text-emerald-600'
-                    }`}>
-                    {locked ? 'Locked' : m.status}
-                  </span>
+              <div className="bg-white rounded-3xl p-6 border border-slate-100 shadow-[0_2px_15px_rgba(0,0,0,0.015)] hover:shadow-[0_8px_30px_rgba(0,0,0,0.04)] transition-shadow">
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2 flex justify-between">
+                  Atrasos <AlertTriangle className="w-3 h-3" />
+                </p>
+                <div className="flex items-end gap-3">
+                  <span className={`text-4xl font-bold ${delayedShipments.length > 0 ? 'text-red-500' : 'text-slate-800'}`}>{delayedShipments.length}</span>
+                  {delayedShipments.length > 0 && <span className="text-xs text-red-600 bg-red-50 px-2 py-0.5 rounded-full font-semibold mb-1">Atenção</span>}
                 </div>
-                <p className="text-slate-500 text-xs leading-tight line-clamp-2">{m.desc}</p>
-                {permType && (
-                  <div className="mt-2 flex items-center gap-1.5">
-                    <div className={`w-1.5 h-1.5 rounded-full ${permType === 'edit' ? 'bg-emerald-400' : 'bg-blue-400'}`}></div>
-                    <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">{permType} access</span>
+              </div>
+
+              <div className="bg-white rounded-3xl p-6 border border-slate-100 shadow-[0_2px_15px_rgba(0,0,0,0.015)] hover:shadow-[0_8px_30px_rgba(0,0,0,0.04)] transition-shadow">
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2 flex justify-between">
+                  Média Frete <Calculator className="w-3 h-3" />
+                </p>
+                <div className="flex items-end gap-2">
+                  <span className="text-2xl font-bold text-slate-800 tracking-tight">{new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(avgFreight)}</span>
+                </div>
+              </div>
+
+              <div className="bg-white rounded-3xl p-6 border border-slate-100 shadow-[0_2px_15px_rgba(0,0,0,0.015)] hover:shadow-[0_8px_30px_rgba(0,0,0,0.04)] transition-shadow">
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2 flex justify-between">
+                  Docs a Vencer <FileText className="w-3 h-3" />
+                </p>
+                <div className="flex items-end gap-3">
+                  <span className="text-4xl font-bold text-amber-500">{expiringDocs}</span>
+                  <span className="text-xs text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full font-semibold mb-1">&lt; 30 dias</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Feature Cards Row */}
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+               
+               <div className="lg:col-span-8 bg-white rounded-3xl p-8 border border-slate-100 shadow-[0_2px_15px_rgba(0,0,0,0.015)] hover:shadow-[0_8px_30px_rgba(0,0,0,0.04)] transition-shadow">
+                 <h3 className="text-sm font-semibold text-slate-800 mb-6 flex items-center gap-2"><Zap className="w-4 h-4 text-orange-500"/> ForkManager Atividades</h3>
+                 
+                 <div className="space-y-4">
+                   <div className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl">
+                     <div className="flex flex-col">
+                       <span className="text-sm font-semibold text-slate-700">Custo Total em Manutenção</span>
+                       <span className="text-[10px] text-slate-400">YTD consolidado</span>
+                     </div>
+                     <span className="text-lg font-bold text-slate-800">R$ 12.450,00</span>
+                   </div>
+
+                   <div className="flex items-center justify-between p-4 border border-rose-100 bg-rose-50/50 rounded-2xl">
+                     <div className="flex flex-col">
+                       <span className="text-sm font-semibold text-rose-700">Ação Necessária: Revisão de Frota</span>
+                       <span className="text-[10px] text-rose-500">2 Veículos demandam preventiva urgente</span>
+                     </div>
+                     <button className="px-4 py-2 bg-rose-500 text-white rounded-xl text-xs font-bold hover:bg-rose-600 transition-colors">Verificar</button>
+                   </div>
+                 </div>
+               </div>
+
+               <div className="lg:col-span-4 bg-gradient-to-br from-orange-500 to-rose-500 rounded-3xl p-8 text-white shadow-xl shadow-orange-500/20 relative overflow-hidden group">
+                 <div className="absolute top-0 right-0 w-32 h-32 bg-white/10 blur-2xl rounded-full translate-x-10 -translate-y-10 group-hover:scale-110 transition-transform"></div>
+                 <div className="relative z-10 h-full flex flex-col justify-between">
+                   <div>
+                     <h2 className="text-sm font-semibold opacity-90 mb-1 flex justify-between items-center">
+                       Módulo Financeiro <CreditCard className="w-5 h-5 opacity-80" />
+                     </h2>
+                     <p className="text-3xl font-bold mt-4 tracking-tight">{new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(pendingPaymentsValue)}</p>
+                   </div>
+                   <div className="mt-8 flex justify-between items-end opacity-90 text-sm font-medium">
+                     <span className="bg-white/20 px-3 py-1.5 rounded-lg">{pendingPayments.length} pendências</span>
+                     <ArrowLeft className="w-5 h-5 hover:scale-110 transition-transform cursor-pointer" />
+                   </div>
+                 </div>
+               </div>
+
+            </div>
+         </div>
+      </div>
+
+      {/* EXPANDABLE RIGHT MENU - PAM CHAT */}
+      <div 
+        className={`${isRightMenuExpanded ? 'w-[340px]' : 'w-0'} transition-all duration-300 ease-in-out bg-white border-l border-slate-100 shadow-[-2px_0_15px_rgba(0,0,0,0.02)] flex flex-col shrink-0 z-40 relative overflow-hidden`}
+      >
+        <div className="w-[340px] flex flex-col h-full right-0">
+          <div className="px-5 py-4 bg-white border-b border-slate-100 flex items-center gap-3 relative shrink-0">
+            <div className="w-8 h-8 rounded-[12px] bg-gradient-to-br from-orange-400 to-rose-500 flex items-center justify-center text-white shadow-sm">
+              <Sparkles className="w-4 h-4" />
+            </div>
+            <div className="flex-1">
+              <p className="text-sm font-bold tracking-tight text-slate-800">Pam</p>
+              <p className="text-[10px] text-slate-400 font-medium tracking-widest uppercase">Assistente Rápida</p>
+            </div>
+            <button onClick={() => setIsRightMenuExpanded(false)} className="w-8 h-8 rounded-full flex items-center justify-center hover:bg-slate-100 text-slate-400 transition-colors cursor-pointer">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+          
+          <div className="flex-1 p-4 overflow-y-auto space-y-4 custom-scrollbar text-xs bg-[#fafafa]">
+            {chatHistory.map((c, i) => (
+              <div key={i} className={`flex gap-3 ${c.role === 'ai' ? 'justify-start' : 'justify-end'}`}>
+                {c.role === 'ai' && (
+                  <div className="w-6 h-6 rounded-full bg-gradient-to-br from-orange-400 to-rose-500 flex items-center justify-center text-white shrink-0 shadow-sm mt-0.5">
+                    <Sparkles className="w-3 h-3" />
                   </div>
                 )}
+                <div className={`px-4 py-2.5 rounded-2xl max-w-[85%] leading-relaxed shadow-sm font-medium ${c.role === 'ai' ? 'bg-white border border-slate-100 text-slate-700 rounded-tl-none' : 'bg-slate-800 text-white rounded-tr-none'}`}>
+                  {c.msg}
+                </div>
               </div>
+            ))}
+          </div>
 
-              {locked && (
-                <div className="absolute inset-0 bg-slate-50/20 backdrop-blur-[1px] flex items-center justify-end pr-4 pointer-events-none">
-                  <div className="bg-white/90 p-2 rounded-full shadow-sm border border-slate-100">
-                    <Lock className="w-4 h-4 text-slate-400" />
+          <form onSubmit={handleSendChat} className="p-3 bg-white border-t border-slate-100 flex gap-2 shrink-0">
+             <input
+               value={chatMsg}
+               onChange={e => setChatMsg(e.target.value)}
+               placeholder="Perguntar à Pam..."
+               className="flex-1 bg-slate-100 text-xs font-medium outline-none rounded-xl px-4 py-2 text-slate-700 placeholder:text-slate-400 focus:ring-2 focus:ring-orange-500/30 transition-shadow"
+             />
+             <button disabled={!chatMsg.trim()} type="submit" className="w-9 h-9 shrink-0 rounded-xl bg-slate-800 text-white flex items-center justify-center hover:bg-slate-700 disabled:opacity-50 transition-colors shadow-sm active:scale-95 cursor-pointer">
+               <Send className="w-3 h-3 ml-0.5" />
+             </button>
+          </form>
+        </div>
+      </div>
+
+      {/* FLOAT CHAT TOGGLE BUTTON */}
+      <div className="fixed bottom-6 right-6 z-50">
+        <button 
+          onClick={() => setIsRightMenuExpanded(!isRightMenuExpanded)}
+          className={`w-14 h-14 rounded-full flex items-center justify-center text-white transition-all duration-300 shadow-[0_8px_20px_rgba(249,115,22,0.4)] active:scale-95 cursor-pointer ${isRightMenuExpanded ? 'bg-slate-800 shadow-[0_8px_20px_rgba(0,0,0,0.2)] hover:bg-slate-700' : 'bg-gradient-to-r from-orange-500 to-rose-500 hover:scale-105'}`}
+        >
+          {isRightMenuExpanded ? <X className="w-6 h-6" /> : <MessageSquare className="w-6 h-6" />}
+        </button>
+      </div>
+    </div>
+  );
+};
+
+const PamModule = ({ onBack, profile }: { onBack: () => void, profile: Profile | null }) => {
+  const [chatMsg, setChatMsg] = useState('');
+  const [chatHistory, setChatHistory] = useState([
+    { role: 'ai', msg: 'Olá! Sou a Pam. Como posso analisar sua frota ou otimizar seus embarques hoje?' }
+  ]);
+  
+  const handleSendChat = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!chatMsg.trim()) return;
+    setChatHistory([...chatHistory, { role: 'user', msg: chatMsg }, { role: 'ai', msg: 'Perfeito! Analisei sua solicitação com base nos dados mais recentes. O que mais você gostaria de saber?' }]);
+    setChatMsg('');
+  };
+
+  return (
+    <div className="flex bg-white font-sans text-slate-800 h-[calc(100vh-64px)] w-full overflow-hidden">
+      {/* Left Sidebar - History */}
+      <div className="w-72 border-r border-slate-100 bg-[#fafafa] flex flex-col py-6 shrink-0 shadow-[2px_0_15px_rgba(0,0,0,0.02)] relative z-10">
+        <div className="px-5 mb-8">
+          <button onClick={onBack} className="flex items-center gap-2 text-slate-500 hover:text-slate-900 font-semibold text-sm transition-colors cursor-pointer w-fit">
+            <ArrowLeft className="w-5 h-5" /> Retornar ao Dashboard
+          </button>
+        </div>
+        
+        <div className="px-5 mb-8">
+          <button className="flex items-center gap-3 bg-white w-full py-3 px-5 rounded-2xl shadow-[0_2px_10px_rgba(0,0,0,0.03)] hover:shadow-[0_8px_20px_rgba(0,0,0,0.06)] transition-all cursor-pointer font-bold text-sm border border-slate-100 text-slate-700 hover:text-orange-600 group active:scale-95">
+            <Plus className="w-5 h-5 text-slate-400 group-hover:text-orange-500 transition-colors" /> Nova Solicitação
+          </button>
+        </div>
+        
+        <div className="flex-1 overflow-y-auto px-3 custom-scrollbar space-y-1 text-slate-600">
+          <p className="px-4 py-2 text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Recentes</p>
+          <button className="w-full text-left px-4 py-3 text-sm font-medium hover:bg-slate-100/80 rounded-xl truncate cursor-pointer transition-colors flex items-center gap-3">
+             <MessageSquare className="w-4 h-4 opacity-50 shrink-0" /> <span className="truncate">Custo médio da Rota SP-MAO</span>
+          </button>
+          <button className="w-full text-left px-4 py-3 text-sm font-medium hover:bg-slate-100/80 rounded-xl truncate cursor-pointer transition-colors flex items-center gap-3">
+             <MessageSquare className="w-4 h-4 opacity-50 shrink-0" /> <span className="truncate">Veículos demandando manutenção</span>
+          </button>
+          <button className="w-full text-left px-4 py-3 text-sm font-medium hover:bg-slate-100/80 rounded-xl truncate cursor-pointer transition-colors flex items-center gap-3">
+             <MessageSquare className="w-4 h-4 opacity-50 shrink-0" /> <span className="truncate">Resumo embarques atrasados</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Main Chat Area - like Gemini */}
+      <div className="flex-1 flex flex-col relative bg-white h-full">
+        <div className="flex-1 overflow-y-auto p-4 sm:p-8 flex flex-col custom-scrollbar">
+           <div className="max-w-3xl mx-auto w-full flex-1 flex flex-col space-y-6 pt-12 pb-32">
+             {chatHistory.length === 1 && (
+               <div className="flex flex-col items-center justify-center flex-1 space-y-6 opacity-90 h-full -mt-10">
+                 <div className="w-20 h-20 bg-gradient-to-br from-orange-400 to-rose-500 rounded-[24px] flex items-center justify-center text-white shadow-xl shadow-orange-500/20 rotate-3 hover:rotate-6 transition-transform">
+                   <Sparkles className="w-10 h-10" />
+                 </div>
+                 <h2 className="text-3xl font-semibold tracking-tight text-center text-slate-800">Sua assistente Pam</h2>
+               </div>
+             )}
+             {chatHistory.map((c, i) => (
+                <div key={i} className={`flex gap-4 w-full ${c.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                  {c.role === 'ai' && (
+                    <div className="w-8 h-8 rounded-[10px] bg-gradient-to-br from-orange-400 to-rose-500 flex items-center justify-center text-white shrink-0 shadow-sm mt-1">
+                      <Sparkles className="w-4 h-4" />
+                    </div>
+                  )}
+                  <div className={`px-6 py-4 rounded-3xl max-w-[85%] text-[15px] leading-relaxed font-medium shadow-[0_2px_10px_rgba(0,0,0,0.02)] ${c.role === 'ai' ? 'text-slate-700 bg-white border border-slate-100 rounded-tl-none' : 'bg-slate-100 text-slate-800 rounded-tr-none'}`}>
+                    {c.msg}
                   </div>
+                  {c.role === 'user' && (
+                    <div className="w-8 h-8 rounded-full bg-slate-200 flex items-center justify-center text-slate-600 shrink-0 mt-1 overflow-hidden border border-slate-200">
+                      <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${profile?.email || 'user'}`} alt="User" className="w-full h-full object-cover" />
+                    </div>
+                  )}
                 </div>
-              )}
+             ))}
+           </div>
+        </div>
 
-              {!locked && (
-                <div className="absolute bottom-2 right-4 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <ChevronRight className="w-4 h-4 text-blue-500" />
-                </div>
-              )}
-            </motion.div>
-          );
-        })}
+        {/* Input Area */}
+        <div className="absolute bottom-0 left-0 right-0 px-4 pb-8 pt-20 bg-gradient-to-t from-white via-white/95 to-transparent pointer-events-none">
+          <div className="max-w-3xl mx-auto pointer-events-auto">
+            <form onSubmit={handleSendChat} className="relative shadow-[0_10px_40px_rgba(0,0,0,0.08)] rounded-[28px] bg-white border border-slate-200 group focus-within:ring-4 focus-within:ring-orange-500/10 focus-within:border-orange-200 transition-all">
+               <input
+                 value={chatMsg}
+                 onChange={e => setChatMsg(e.target.value)}
+                 placeholder="Faça uma pergunta ou solicite uma análise para a Pam..."
+                 className="w-full py-5 pl-8 pr-16 outline-none rounded-[28px] text-[15px] font-medium text-slate-700 placeholder:text-slate-400 bg-transparent"
+               />
+               <button disabled={!chatMsg.trim()} type="submit" className="absolute right-3 top-3 bottom-3 w-12 shrink-0 rounded-[20px] bg-slate-800 text-white flex items-center justify-center hover:bg-slate-700 disabled:opacity-50 transition-all shadow-sm active:scale-95 cursor-pointer">
+                 <Send className="w-5 h-5 ml-1" />
+               </button>
+            </form>
+            <p className="text-center text-[10px] text-slate-400 mt-4 font-semibold tracking-wide uppercase">A Pam pode apresentar informações incorretas. Verifique fatos importantes.</p>
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -3445,6 +3728,7 @@ export default function App() {
                 }}
                 profile={profile}
                 permissions={permissions}
+                shipments={shipments}
               />
             </motion.div>
           )}
@@ -3503,6 +3787,12 @@ export default function App() {
                 onBack={() => setView('dashboard')}
                 onUpdateStatus={() => setShowStatusModal(true)}
               />
+            </motion.div>
+          )}
+
+          {view === 'pam' && (
+            <motion.div key="pam" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+              <PamModule onBack={() => setView('home')} profile={profile} />
             </motion.div>
           )}
 
