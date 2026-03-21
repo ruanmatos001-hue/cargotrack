@@ -255,10 +255,10 @@ const Header = ({ activeTab, onTabChange, profile, permissions }: { activeTab: s
       <div className="flex justify-between h-16 items-center">
         <div className="flex items-center gap-8">
           <div className="flex items-center gap-2 cursor-pointer group" onClick={() => onTabChange('home')}>
-            <div className="bg-blue-600 p-1.5 rounded-lg group-hover:bg-blue-700 transition-colors shadow-lg shadow-blue-200">
+            <div className="bg-orange-600 p-1.5 rounded-lg group-hover:bg-orange-700 transition-colors shadow-lg shadow-orange-200">
               <Package className="w-6 h-6 text-white" />
             </div>
-            <span className="text-xl font-bold tracking-tight text-slate-900 group-hover:text-blue-600 transition-colors">CargoTrack</span>
+            <span className="text-xl font-bold tracking-tight text-slate-900 group-hover:text-orange-600 transition-colors">CargoTrack</span>
           </div>
           <nav className="hidden md:flex space-x-8">
             {['Dashboard', 'Shipments', 'Payments', 'Reports', 'Settings'].map((tab) => {
@@ -268,12 +268,12 @@ const Header = ({ activeTab, onTabChange, profile, permissions }: { activeTab: s
                 <button
                   key={tab}
                   onClick={() => onTabChange(tab.toLowerCase())}
-                  className={`text-sm font-medium transition-colors relative py-5 ${activeTab === tab.toLowerCase() ? 'text-blue-600' : 'text-slate-500 hover:text-slate-900'
+                  className={`text-sm font-medium transition-colors relative py-5 ${activeTab === tab.toLowerCase() ? 'text-orange-600' : 'text-slate-500 hover:text-slate-900'
                     }`}
                 >
                   {tab}
                   {activeTab === tab.toLowerCase() && (
-                    <motion.div layoutId="activeTab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600" />
+                    <motion.div layoutId="activeTab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-orange-600" />
                   )}
                 </button>
               );
@@ -866,12 +866,17 @@ const Dashboard = ({ shipments, onSelectShipment, onCreateNew, onBack }: {
               <div className="lg:col-span-3">
                 <div className="flex items-center gap-3 mb-2">
                   <span className="text-xs font-mono font-bold text-slate-400 uppercase tracking-wider">Tracking</span>
-                  {metrics.delayDays > 0 && (
+                  {shipment.status === 'completed' && (
+                    <span className="px-2 py-0.5 bg-indigo-50 text-indigo-600 text-[10px] font-bold rounded uppercase border border-indigo-100 flex items-center gap-1">
+                      <CheckCircle2 className="w-3 h-3" /> Entregue
+                    </span>
+                  )}
+                  {shipment.status !== 'completed' && metrics.delayDays > 0 && (
                     <span className="px-2 py-0.5 bg-red-50 text-red-600 text-[10px] font-bold rounded uppercase border border-red-100 flex items-center gap-1">
                       <AlertTriangle className="w-3 h-3" /> +{metrics.delayDays}d Delayed
                     </span>
                   )}
-                  {metrics.delayDays === 0 && (
+                  {shipment.status !== 'completed' && metrics.delayDays === 0 && (
                     <span className="px-2 py-0.5 bg-emerald-50 text-emerald-600 text-[10px] font-bold rounded uppercase border border-emerald-100">On Route</span>
                   )}
                 </div>
@@ -954,7 +959,7 @@ const CreateShipment = ({ onCancel, onSave }: { onCancel: () => void; onSave: (s
   const [mode, setMode] = useState<TransportMode>('Road');
   const [origin, setOrigin] = useState('Manaus (MAO)');
   const [destination, setDestination] = useState('Extrema (MG)');
-  const [departureDate, setDepartureDate] = useState('2026-02-25');
+  const [departureDate, setDepartureDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [carrier, setCarrier] = useState('');
   const [cargoType, setCargoType] = useState<'Lotação' | 'Fracionado'>('Lotação');
   const [cargoDescription, setCargoDescription] = useState('');
@@ -1375,11 +1380,13 @@ const CreateShipment = ({ onCancel, onSave }: { onCancel: () => void; onSave: (s
 const ShipmentDetail = ({
   shipment,
   onBack,
-  onUpdateStatus
+  onUpdateStatus,
+  onDeleteShipment
 }: {
   shipment: Shipment;
   onBack: () => void;
   onUpdateStatus: () => void;
+  onDeleteShipment: (id: string) => void;
 }) => {
   const ModeIcon = MODAL_CONFIGS[shipment.mode].icon;
   const metrics = getTransitMetrics(shipment);
@@ -1401,6 +1408,11 @@ const ShipmentDetail = ({
             <span className="px-3 py-1 bg-blue-50 text-blue-600 text-xs font-bold rounded-full border border-blue-100 uppercase tracking-wider">
               {shipment.mode}
             </span>
+            {shipment.status === 'completed' && (
+              <span className="px-3 py-1 bg-indigo-50 text-indigo-600 text-xs font-bold rounded-full border border-indigo-100 uppercase tracking-wider flex items-center gap-1">
+                <CheckCircle2 className="w-3 h-3" /> Entregue
+              </span>
+            )}
             {shipment.status === 'delayed' && (
               <span className="px-3 py-1 bg-amber-50 text-amber-600 text-xs font-bold rounded-full border border-amber-100 uppercase tracking-wider flex items-center gap-1">
                 <AlertTriangle className="w-3 h-3" /> Attention
@@ -1427,6 +1439,16 @@ const ShipmentDetail = ({
           <button className="flex items-center justify-center gap-2 px-4 py-3 sm:py-2 border border-slate-200 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-50">
             <Download className="w-4 h-4" />
             Download All Docs
+          </button>
+          <button
+            onClick={() => {
+              if (window.confirm('Tem certeza que deseja apagar este embarque?')) {
+                onDeleteShipment(shipment.id);
+              }
+            }}
+            className="flex items-center justify-center gap-2 px-4 py-3 sm:py-2 bg-red-50 text-red-600 border border-red-100 rounded-lg text-sm font-medium hover:bg-red-100 shadow-sm transition-colors"
+          >
+            <Trash2 className="w-4 h-4" /> Apagar
           </button>
           <button
             onClick={onUpdateStatus}
@@ -1835,19 +1857,42 @@ const SettingsPanel = ({ onBack, currentUser }: { onBack: () => void, currentUse
     }
 
     try {
-      const { data, error } = await supabase
-        .from('profiles')
-        .insert({
+      const { data: authData, error: authError } = await supabase.auth.signUp({
+        email: newUserEmail,
+        password: 'CargoTrack@123'
+      });
+
+      if (authError) {
+        if (authError.message.includes('User already registered')) {
+          const { error: insertError } = await supabase.from('profiles').insert({
+            email: newUserEmail,
+            role: newUserRole,
+            company_id: currentUser?.company_id || null,
+          });
+          if (insertError) throw insertError;
+          alert(`Convite criado! O usuário já possuía uma conta e o perfil foi criado.`);
+          fetchUsers();
+          setNewUserEmail('');
+          setIsModalOpen(false);
+          return;
+        } else {
+          throw authError;
+        }
+      }
+
+      if (authData?.user?.id) {
+        await supabase.from('profiles').upsert({
+          id: authData.user.id,
           email: newUserEmail,
           role: newUserRole,
-          company_id: currentUser?.company_id || null,
-        })
-        .select()
-        .single();
+          company_id: currentUser?.company_id || null
+        });
+      }
 
-      if (error) throw error;
-
-      alert(`Invitation for ${newUserEmail} created successfully! The user can now register and their profile will be linked.`);
+      alert(`Usuário criado com sucesso!\n\nEmail: ${newUserEmail}\nSenha temporária: CargoTrack@123`);
+      fetchUsers();
+      setNewUserEmail('');
+      setIsModalOpen(false);
       setNewUserEmail('');
       setNewUserRole('user');
       fetchUsers();
@@ -2116,10 +2161,6 @@ const PaymentsPanel = ({ onBack, profile }: { onBack: () => void, profile: Profi
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!profile?.company_id) {
-      alert('Company ID not found in profile.');
-      return;
-    }
     try {
       const { error } = await supabase.from('payments').insert([{
         type: newPayment.type,
@@ -2128,7 +2169,7 @@ const PaymentsPanel = ({ onBack, profile }: { onBack: () => void, profile: Profi
         amount: parseFloat(newPayment.amount),
         description: newPayment.description,
         due_date: newPayment.due_date,
-        company_id: profile.company_id,
+        company_id: profile?.company_id || null,
         status: 'pending'
       }]);
       if (error) throw error;
@@ -2150,11 +2191,28 @@ const PaymentsPanel = ({ onBack, profile }: { onBack: () => void, profile: Profi
 
   const markAsPaid = async (id: string) => {
     try {
+      const paymentToUpdate = payments.find(p => p.id === id);
       const { error } = await supabase
         .from('payments')
         .update({ status: 'paid', paid_at: new Date().toISOString() })
         .eq('id', id);
       if (error) throw error;
+      
+      if (paymentToUpdate && paymentToUpdate.type === 'monthly') {
+        const nextDue = new Date(paymentToUpdate.due_date);
+        nextDue.setMonth(nextDue.getMonth() + 1);
+        
+        await supabase.from('payments').insert([{
+          type: 'monthly',
+          document_type: paymentToUpdate.document_type,
+          amount: paymentToUpdate.amount,
+          description: paymentToUpdate.description,
+          due_date: nextDue.toISOString().split('T')[0],
+          company_id: paymentToUpdate.company_id,
+          status: 'pending'
+        }]);
+      }
+
       fetchPayments();
     } catch (err) {
       alert('Error updating status');
@@ -3636,8 +3694,8 @@ export default function App() {
           invoices: s.invoices,
           invoice_file_url: s.invoiceFileUrl,
           invoice_file_name: s.invoiceFileName,
-          user_id: session.user.id,
-          company_id: profile?.company_id
+          user_id: session?.user.id === '00000000-0000-0000-0000-000000000000' ? null : session?.user.id,
+          company_id: profile?.company_id || null
         }]);
 
       if (error) {
@@ -3651,6 +3709,27 @@ export default function App() {
     } catch (err: any) {
       console.error('Error saving shipment:', err);
       alert('Erro ao salvar no banco de dados: ' + (err.message || 'Erro desconhecido. Verifique o console.'));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDeleteShipment = async (id: string) => {
+    try {
+      setLoading(true);
+      const { error } = await supabase
+        .from('shipments')
+        .delete()
+        .eq('id', id);
+
+      if (error) throw error;
+
+      alert('Embarque apagado com sucesso!');
+      setView('dashboard');
+      await fetchShipments();
+    } catch (err: any) {
+      console.error('Error deleting shipment:', err);
+      alert('Erro ao apagar: ' + (err.message || 'Erro desconhecido.'));
     } finally {
       setLoading(false);
     }
@@ -3786,6 +3865,7 @@ export default function App() {
                 shipment={selectedShipment}
                 onBack={() => setView('dashboard')}
                 onUpdateStatus={() => setShowStatusModal(true)}
+                onDeleteShipment={handleDeleteShipment}
               />
             </motion.div>
           )}
