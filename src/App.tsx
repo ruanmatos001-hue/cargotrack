@@ -261,9 +261,9 @@ const Header = ({ activeTab, onTabChange, profile, permissions }: { activeTab: s
             <span className="text-xl font-bold tracking-tight text-slate-900 group-hover:text-orange-600 transition-colors">CargoTrack</span>
           </div>
           <nav className="hidden md:flex space-x-8">
-            {['Dashboard', 'Shipments', 'Payments', 'Reports', 'Settings'].map((tab) => {
+            {['Settings'].map((tab) => {
               if (tab === 'Settings' && profile?.role !== 'super-admin' && profile?.role !== 'company-admin') return null;
-              if (tab === 'Payments' && profile?.role !== 'super-admin' && profile?.role !== 'company-admin' && !permissions.some(p => p.module_id === 'payments')) return null;
+              
               return (
                 <button
                   key={tab}
@@ -302,61 +302,45 @@ const Header = ({ activeTab, onTabChange, profile, permissions }: { activeTab: s
 );
 
 const MainPanel = ({ onNavigate, profile, permissions, shipments }: { onNavigate: (view: any) => void, profile: Profile | null, permissions: ModuleAccess[], shipments: Shipment[] }) => {
-  const [payments, setPayments] = useState<Payment[]>([]);
-  const [docs, setDocs] = useState<Document[]>([]);
-  const [chatMsg, setChatMsg] = useState('');
-  const [isMenuExpanded, setIsMenuExpanded] = useState(false);
-  const [isRightMenuExpanded, setIsRightMenuExpanded] = useState(false);
-  const [chatHistory, setChatHistory] = useState([
-    { role: 'ai', msg: 'Oi! Sou a Pam. Como posso analisar sua operação hoje?' }
-  ]);
+  const [payments, setPayments] = React.useState<Payment[]>([]);
+  const [docs, setDocs] = React.useState<Document[]>([]);
 
-  useEffect(() => {
+  React.useEffect(() => {
     const fetchStats = async () => {
-      let qPay = supabase.from('payments').select('*');
-      let qDoc = supabase.from('documents').select('*');
-      
-      if (profile?.role !== 'super-admin' && profile?.company_id) {
-         qPay = qPay.eq('company_id', profile.company_id);
-         qDoc = qDoc.eq('company_id', profile.company_id);
-      }
+      try {
+        let qPay = supabase.from('payments').select('*');
+        let qDoc = supabase.from('documents').select('*');
+        
+        if (profile?.role !== 'super-admin' && profile?.company_id) {
+           qPay = qPay.eq('company_id', profile.company_id);
+           qDoc = qDoc.eq('company_id', profile.company_id);
+        }
 
-      const [resPay, resDoc] = await Promise.all([qPay, qDoc]);
-      if (resPay.data) setPayments(resPay.data);
-      if (resDoc.data) setDocs(resDoc.data);
+        const [resPay, resDoc] = await Promise.all([qPay, qDoc]);
+        if (resPay.data) setPayments(resPay.data);
+        if (resDoc.data) setDocs(resDoc.data);
+      } catch (e) {
+        console.error('Stats fetch error', e);
+      }
     };
     if (profile) fetchStats();
   }, [profile]);
 
-  // Combined module & updated FreightCalc
-  const modules = [
-    { id: 'pam', title: 'Pam AI', desc: 'Assistente Inteligente', icon: Sparkles, color: 'bg-orange-50 text-orange-600', status: 'Active' },
-    { id: 'dashboard', title: 'Shipments', desc: 'Operational overview', icon: Truck, color: 'bg-emerald-50 text-emerald-600', status: 'Active' },
-    { id: 'routing', title: 'CargoFit / Routing', desc: 'Trailer occupation', icon: Route, color: 'bg-indigo-50 text-indigo-600', status: 'New' },
-    { id: 'freight-calc', title: 'Freight Control', desc: 'Cost optimization', icon: Calculator, color: 'bg-amber-50 text-amber-600', status: 'Static', noClick: true },
-    { id: 'fork-manager', title: 'ForkManager', desc: 'Fleet maintenance', icon: Zap, color: 'bg-orange-50 text-orange-600', status: 'Active' },
-    { id: 'payments', title: 'Payments', desc: 'Invoices & slips', icon: CreditCard, color: 'bg-rose-50 text-rose-600', status: 'Active' },
-    { id: 'docs', title: 'Documents', desc: 'SGI & contracts', icon: ShieldCheck, color: 'bg-cyan-50 text-cyan-600', status: 'Active' },
-    { id: 'fleet', title: 'Fleet Registry', desc: 'Vehicle loading', icon: Camera, color: 'bg-slate-100 text-slate-600', status: 'Active' },
-  ];
-
-  const hasAccess = (modId: string) => {
-    if (profile?.role === 'super-admin') return true;
-    return permissions.some(p => p.module_id === modId);
-  };
-
   // KPI Calculations
-  const activeShipments = shipments.filter(s => s.status === 'on-route' || s.status === 'pending').length;
-  const delayedShipments = shipments.filter(s => getTransitMetrics(s).delayDays > 0);
-  
-  // parse numeric value from cargo string like "R$ 4.250,00"
-  let totalFreight = 0;
-  shipments.forEach(s => {
-    const numericStr = s.value.replace(/[^0-9,.-]/g, '').replace(/\./g, '').replace(',', '.');
-    const val = parseFloat(numericStr);
-    if (!isNaN(val)) totalFreight += val;
+  const activeShipments = (shipments || []).filter(s => s.status === 'on-route' || s.status === 'pending').length;
+  const delayedShipments = (shipments || []).filter(s => {
+    try { return getTransitMetrics(s).delayDays > 0; } catch { return false; }
   });
-  const avgFreight = shipments.length > 0 ? (totalFreight / shipments.length) : 0;
+  
+  let totalFreight = 0;
+  (shipments || []).forEach(s => {
+    try {
+      const numericStr = (s.value || '').replace(/[^0-9,.-]/g, '').replace(/\./g, '').replace(',', '.');
+      const val = parseFloat(numericStr);
+      if (!isNaN(val)) totalFreight += val;
+    } catch (_) {}
+  });
+  const avgFreight = shipments?.length > 0 ? (totalFreight / shipments.length) : 0;
 
   const pendingPayments = payments.filter(p => p.status === 'pending');
   const pendingPaymentsValue = pendingPayments.reduce((acc, p) => acc + p.amount, 0);
@@ -368,207 +352,106 @@ const MainPanel = ({ onNavigate, profile, permissions, shipments }: { onNavigate
   const expiredDocs = docs.filter(d => d.expiry_date && new Date(d.expiry_date) < today).length;
   const expiringDocs = docs.filter(d => d.expiry_date && new Date(d.expiry_date) >= today && new Date(d.expiry_date) <= warningDate).length;
 
-  const handleSendChat = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!chatMsg.trim()) return;
-    setChatHistory([...chatHistory, { role: 'user', msg: chatMsg }, { role: 'ai', msg: 'Anotado. Estou analisando seus dados, mas como sou uma IA demonstrativa, ainda não efetuo alterações profundas na sua base.' }]);
-    setChatMsg('');
-  };
-
   return (
-    <div className="bg-[#fafafa] min-h-[calc(100vh-64px)] w-full flex relative overflow-hidden text-slate-800 font-sans">
+    <div className="max-w-6xl mx-auto p-4 sm:p-8 pb-24">
+      <h1 className="text-2xl font-semibold mb-6 text-slate-800 tracking-tight">Visão Geral <span className="text-slate-400 text-sm ml-2 font-normal">Métricas consolidadas</span></h1>
       
-      {/* EXPANDABLE LEFT MENU */}
-      <div 
-        className={`${isMenuExpanded ? 'w-64' : 'w-20'} transition-all duration-300 ease-in-out bg-white border-r border-slate-100 shadow-[2px_0_15px_rgba(0,0,0,0.02)] flex flex-col items-center py-6 shrink-0 z-10 relative`}
-      >
-        <button 
-          onClick={() => setIsMenuExpanded(!isMenuExpanded)}
-          className="w-10 h-10 mb-8 rounded-2xl bg-orange-50 text-orange-600 flex items-center justify-center hover:bg-orange-100 transition-colors cursor-pointer"
-        >
-          <Package className="w-5 h-5" />
-        </button>
+      {/* KPI Row */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+        <div className="bg-white rounded-3xl p-6 border border-slate-100 shadow-[0_2px_15px_rgba(0,0,0,0.015)] hover:shadow-[0_8px_30px_rgba(0,0,0,0.04)] transition-shadow">
+          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2 flex justify-between">
+            Embarques <Truck className="w-3 h-3" />
+          </p>
+          <div className="flex items-end gap-3">
+            <span className="text-4xl font-bold text-emerald-500">{activeShipments}</span>
+            <span className="text-xs text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full font-semibold mb-1">Ativos</span>
+          </div>
+        </div>
 
-        <div className="flex flex-col gap-2 w-full px-3">
-          {modules.map((m) => {
-            const locked = !hasAccess(m.id);
-            return (
-              <button
-                key={m.id}
-                onClick={() => {
-                  if (!locked && !m.noClick) onNavigate(m.id);
-                }}
-                className={`flex items-center gap-4 w-full p-3 rounded-2xl transition-all cursor-pointer group hover:bg-slate-50
-                  ${locked || m.noClick ? 'opacity-40 grayscale' : ''}`}
-              >
-                <div className="flex items-center justify-center shrink-0 w-8 h-8 transition-transform group-hover:scale-110">
-                  <m.icon className="w-5 h-5 text-slate-400 group-hover:text-orange-500 transition-colors" />
-                </div>
-                <AnimatePresence>
-                  {isMenuExpanded && (
-                    <motion.div 
-                      initial={{ opacity: 0, width: 0 }} 
-                      animate={{ opacity: 1, width: 'auto' }} 
-                      exit={{ opacity: 0, width: 0 }}
-                      className="flex flex-col items-start min-w-0 flex-1 whitespace-nowrap overflow-hidden"
-                    >
-                      <h3 className="text-sm font-semibold text-slate-700 truncate">{m.title}</h3>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-              </button>
-            )
-          })}
+        <div className="bg-white rounded-3xl p-6 border border-slate-100 shadow-[0_2px_15px_rgba(0,0,0,0.015)] hover:shadow-[0_8px_30px_rgba(0,0,0,0.04)] transition-shadow">
+          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2 flex justify-between">
+            Atrasos <AlertTriangle className="w-3 h-3" />
+          </p>
+          <div className="flex items-end gap-3">
+            <span className={`text-4xl font-bold ${delayedShipments.length > 0 ? 'text-red-500' : 'text-slate-800'}`}>{delayedShipments.length}</span>
+            {delayedShipments.length > 0 && <span className="text-xs text-red-600 bg-red-50 px-2 py-0.5 rounded-full font-semibold mb-1">Atenção</span>}
+          </div>
+        </div>
+
+        <div className="bg-white rounded-3xl p-6 border border-slate-100 shadow-[0_2px_15px_rgba(0,0,0,0.015)] hover:shadow-[0_8px_30px_rgba(0,0,0,0.04)] transition-shadow">
+          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2 flex justify-between">
+            Faturamento Médio <BarChart3 className="w-3 h-3" />
+          </p>
+          <div className="flex items-end gap-3">
+            <span className="text-2xl font-bold text-blue-500">
+              R$ {avgFreight.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            </span>
+          </div>
+          <p className="text-[10px] text-slate-400 mt-2 font-medium">Por embarque realizado</p>
+        </div>
+
+        <div className="bg-white rounded-3xl p-6 border border-slate-100 shadow-[0_2px_15px_rgba(0,0,0,0.015)] hover:shadow-[0_8px_30px_rgba(0,0,0,0.04)] transition-shadow cursor-pointer group" onClick={() => onNavigate('payments')}>
+          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2 flex justify-between">
+            Faturas Pendentes <CreditCard className="w-3 h-3 group-hover:text-rose-500 transition-colors" />
+          </p>
+          <div className="flex items-end gap-3">
+             <span className="text-2xl font-bold text-slate-800">
+                R$ {pendingPaymentsValue.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+             </span>
+             {pendingPaymentsValue > 0 && <span className="text-xs text-rose-600 bg-rose-50 px-2 py-0.5 rounded-full font-semibold mb-1">{pendingPayments.length} Abertos</span>}
+          </div>
         </div>
       </div>
 
-      {/* MIDDLE DASHBOARD */}
-      <div className="flex-1 overflow-y-auto p-4 sm:p-8 custom-scrollbar relative">
-         <div className="max-w-6xl mx-auto pb-24">
-            <h1 className="text-2xl font-semibold mb-6 text-slate-800 tracking-tight">Visão Geral <span className="text-slate-400 text-sm ml-2 font-normal">Métricas consolidadas</span></h1>
-            
-            {/* KPI Row */}
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-              <div className="bg-white rounded-3xl p-6 border border-slate-100 shadow-[0_2px_15px_rgba(0,0,0,0.015)] hover:shadow-[0_8px_30px_rgba(0,0,0,0.04)] transition-shadow">
-                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2 flex justify-between">
-                  Embarques <Truck className="w-3 h-3" />
-                </p>
-                <div className="flex items-end gap-3">
-                  <span className="text-4xl font-bold text-emerald-500">{activeShipments}</span>
-                  <span className="text-xs text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full font-semibold mb-1">Ativos</span>
-                </div>
-              </div>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+         <div className="bg-white rounded-3xl p-8 border border-slate-100 shadow-[0_2px_15px_rgba(0,0,0,0.015)] flex flex-col items-center justify-center min-h-[220px] relative overflow-hidden group cursor-pointer hover:shadow-[0_8px_30px_rgba(0,0,0,0.04)] transition-shadow" onClick={() => onNavigate('dashboard')}>
+            <div className="absolute inset-0 bg-gradient-to-br from-orange-50/50 to-transparent"></div>
+            <Truck className="w-14 h-14 text-orange-100 mb-4 group-hover:scale-110 transition-transform duration-300" />
+            <h3 className="font-bold text-slate-800 text-lg mb-1 relative z-10">Embarques em Rota</h3>
+            <p className="text-slate-500 text-sm mb-4 text-center relative z-10">{activeShipments} embarques ativos agora.</p>
+            <button className="bg-slate-900 text-white px-5 py-2 rounded-full text-sm font-bold shadow hover:bg-orange-600 transition-colors relative z-10">
+               Ver Embarques
+            </button>
+         </div>
 
-              <div className="bg-white rounded-3xl p-6 border border-slate-100 shadow-[0_2px_15px_rgba(0,0,0,0.015)] hover:shadow-[0_8px_30px_rgba(0,0,0,0.04)] transition-shadow">
-                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2 flex justify-between">
-                  Atrasos <AlertTriangle className="w-3 h-3" />
-                </p>
-                <div className="flex items-end gap-3">
-                  <span className={`text-4xl font-bold ${delayedShipments.length > 0 ? 'text-red-500' : 'text-slate-800'}`}>{delayedShipments.length}</span>
-                  {delayedShipments.length > 0 && <span className="text-xs text-red-600 bg-red-50 px-2 py-0.5 rounded-full font-semibold mb-1">Atenção</span>}
-                </div>
-              </div>
-
-              <div className="bg-white rounded-3xl p-6 border border-slate-100 shadow-[0_2px_15px_rgba(0,0,0,0.015)] hover:shadow-[0_8px_30px_rgba(0,0,0,0.04)] transition-shadow">
-                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2 flex justify-between">
-                  Média Frete <Calculator className="w-3 h-3" />
-                </p>
-                <div className="flex items-end gap-2">
-                  <span className="text-2xl font-bold text-slate-800 tracking-tight">{new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(avgFreight)}</span>
-                </div>
-              </div>
-
-              <div className="bg-white rounded-3xl p-6 border border-slate-100 shadow-[0_2px_15px_rgba(0,0,0,0.015)] hover:shadow-[0_8px_30px_rgba(0,0,0,0.04)] transition-shadow">
-                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2 flex justify-between">
-                  Docs a Vencer <FileText className="w-3 h-3" />
-                </p>
-                <div className="flex items-end gap-3">
-                  <span className="text-4xl font-bold text-amber-500">{expiringDocs}</span>
-                  <span className="text-xs text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full font-semibold mb-1">&lt; 30 dias</span>
-                </div>
-              </div>
-            </div>
-
-            {/* Feature Cards Row */}
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-               
-               <div className="lg:col-span-8 bg-white rounded-3xl p-8 border border-slate-100 shadow-[0_2px_15px_rgba(0,0,0,0.015)] hover:shadow-[0_8px_30px_rgba(0,0,0,0.04)] transition-shadow">
-                 <h3 className="text-sm font-semibold text-slate-800 mb-6 flex items-center gap-2"><Zap className="w-4 h-4 text-orange-500"/> ForkManager Atividades</h3>
-                 
-                 <div className="space-y-4">
-                   <div className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl">
-                     <div className="flex flex-col">
-                       <span className="text-sm font-semibold text-slate-700">Custo Total em Manutenção</span>
-                       <span className="text-[10px] text-slate-400">YTD consolidado</span>
+         <div className="bg-white rounded-3xl p-8 border border-slate-100 shadow-[0_2px_15px_rgba(0,0,0,0.015)] hover:shadow-[0_8px_30px_rgba(0,0,0,0.04)] transition-shadow">
+            <h3 className="font-bold text-slate-800 mb-6 flex items-center justify-between">
+               Alerta de Documentos
+               <span className="bg-slate-100 text-slate-500 px-3 py-1 rounded-full text-[10px] uppercase tracking-widest cursor-pointer hover:bg-orange-50 hover:text-orange-600 transition-colors font-bold" onClick={() => onNavigate('docs')}>
+                 VER TODOS
+               </span>
+            </h3>
+            <div className="space-y-4">
+               {expiredDocs > 0 && (
+                  <div className="p-4 rounded-2xl bg-rose-50 border border-rose-100 flex items-center gap-4">
+                     <div className="w-10 h-10 rounded-full bg-rose-100 text-rose-600 flex items-center justify-center shrink-0">
+                        <AlertTriangle className="w-5 h-5" />
                      </div>
-                     <span className="text-lg font-bold text-slate-800">R$ 12.450,00</span>
-                   </div>
-
-                   <div className="flex items-center justify-between p-4 border border-rose-100 bg-rose-50/50 rounded-2xl">
-                     <div className="flex flex-col">
-                       <span className="text-sm font-semibold text-rose-700">Ação Necessária: Revisão de Frota</span>
-                       <span className="text-[10px] text-rose-500">2 Veículos demandam preventiva urgente</span>
+                     <div>
+                        <p className="font-bold text-rose-900">{expiredDocs} documento(s) vencido(s)</p>
+                        <p className="text-xs text-rose-600 mt-1 font-medium">Requer atenção imediata</p>
                      </div>
-                     <button className="px-4 py-2 bg-rose-500 text-white rounded-xl text-xs font-bold hover:bg-rose-600 transition-colors">Verificar</button>
-                   </div>
-                 </div>
-               </div>
-
-               <div className="lg:col-span-4 bg-gradient-to-br from-orange-500 to-rose-500 rounded-3xl p-8 text-white shadow-xl shadow-orange-500/20 relative overflow-hidden group">
-                 <div className="absolute top-0 right-0 w-32 h-32 bg-white/10 blur-2xl rounded-full translate-x-10 -translate-y-10 group-hover:scale-110 transition-transform"></div>
-                 <div className="relative z-10 h-full flex flex-col justify-between">
-                   <div>
-                     <h2 className="text-sm font-semibold opacity-90 mb-1 flex justify-between items-center">
-                       Módulo Financeiro <CreditCard className="w-5 h-5 opacity-80" />
-                     </h2>
-                     <p className="text-3xl font-bold mt-4 tracking-tight">{new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(pendingPaymentsValue)}</p>
-                   </div>
-                   <div className="mt-8 flex justify-between items-end opacity-90 text-sm font-medium">
-                     <span className="bg-white/20 px-3 py-1.5 rounded-lg">{pendingPayments.length} pendências</span>
-                     <ArrowLeft className="w-5 h-5 hover:scale-110 transition-transform cursor-pointer" />
-                   </div>
-                 </div>
-               </div>
-
+                  </div>
+               )}
+               {expiringDocs > 0 && (
+                  <div className="p-4 rounded-2xl bg-amber-50 border border-amber-100 flex items-center gap-4">
+                     <div className="w-10 h-10 rounded-full bg-amber-100 text-amber-600 flex items-center justify-center shrink-0">
+                        <Clock className="w-5 h-5" />
+                     </div>
+                     <div>
+                        <p className="font-bold text-amber-900">{expiringDocs} doc(s) vencendo em 30 dias</p>
+                        <p className="text-xs text-amber-600 mt-1 font-medium">Agende renovação</p>
+                     </div>
+                  </div>
+               )}
+               {expiredDocs === 0 && expiringDocs === 0 && (
+                  <div className="flex flex-col items-center justify-center py-8 text-slate-400">
+                     <ShieldCheck className="w-12 h-12 mb-3 text-emerald-100" />
+                     <p className="font-medium text-emerald-600">Documentação em dia</p>
+                  </div>
+               )}
             </div>
          </div>
-      </div>
-
-      {/* EXPANDABLE RIGHT MENU - PAM CHAT */}
-      <div 
-        className={`${isRightMenuExpanded ? 'w-[340px]' : 'w-0'} transition-all duration-300 ease-in-out bg-white border-l border-slate-100 shadow-[-2px_0_15px_rgba(0,0,0,0.02)] flex flex-col shrink-0 z-40 relative overflow-hidden`}
-      >
-        <div className="w-[340px] flex flex-col h-full right-0">
-          <div className="px-5 py-4 bg-white border-b border-slate-100 flex items-center gap-3 relative shrink-0">
-            <div className="w-8 h-8 rounded-[12px] bg-gradient-to-br from-orange-400 to-rose-500 flex items-center justify-center text-white shadow-sm">
-              <Sparkles className="w-4 h-4" />
-            </div>
-            <div className="flex-1">
-              <p className="text-sm font-bold tracking-tight text-slate-800">Pam</p>
-              <p className="text-[10px] text-slate-400 font-medium tracking-widest uppercase">Assistente Rápida</p>
-            </div>
-            <button onClick={() => setIsRightMenuExpanded(false)} className="w-8 h-8 rounded-full flex items-center justify-center hover:bg-slate-100 text-slate-400 transition-colors cursor-pointer">
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-          
-          <div className="flex-1 p-4 overflow-y-auto space-y-4 custom-scrollbar text-xs bg-[#fafafa]">
-            {chatHistory.map((c, i) => (
-              <div key={i} className={`flex gap-3 ${c.role === 'ai' ? 'justify-start' : 'justify-end'}`}>
-                {c.role === 'ai' && (
-                  <div className="w-6 h-6 rounded-full bg-gradient-to-br from-orange-400 to-rose-500 flex items-center justify-center text-white shrink-0 shadow-sm mt-0.5">
-                    <Sparkles className="w-3 h-3" />
-                  </div>
-                )}
-                <div className={`px-4 py-2.5 rounded-2xl max-w-[85%] leading-relaxed shadow-sm font-medium ${c.role === 'ai' ? 'bg-white border border-slate-100 text-slate-700 rounded-tl-none' : 'bg-slate-800 text-white rounded-tr-none'}`}>
-                  {c.msg}
-                </div>
-              </div>
-            ))}
-          </div>
-
-          <form onSubmit={handleSendChat} className="p-3 bg-white border-t border-slate-100 flex gap-2 shrink-0">
-             <input
-               value={chatMsg}
-               onChange={e => setChatMsg(e.target.value)}
-               placeholder="Perguntar à Pam..."
-               className="flex-1 bg-slate-100 text-xs font-medium outline-none rounded-xl px-4 py-2 text-slate-700 placeholder:text-slate-400 focus:ring-2 focus:ring-orange-500/30 transition-shadow"
-             />
-             <button disabled={!chatMsg.trim()} type="submit" className="w-9 h-9 shrink-0 rounded-xl bg-slate-800 text-white flex items-center justify-center hover:bg-slate-700 disabled:opacity-50 transition-colors shadow-sm active:scale-95 cursor-pointer">
-               <Send className="w-3 h-3 ml-0.5" />
-             </button>
-          </form>
-        </div>
-      </div>
-
-      {/* FLOAT CHAT TOGGLE BUTTON */}
-      <div className="fixed bottom-6 right-6 z-50">
-        <button 
-          onClick={() => setIsRightMenuExpanded(!isRightMenuExpanded)}
-          className={`w-14 h-14 rounded-full flex items-center justify-center text-white transition-all duration-300 shadow-[0_8px_20px_rgba(249,115,22,0.4)] active:scale-95 cursor-pointer ${isRightMenuExpanded ? 'bg-slate-800 shadow-[0_8px_20px_rgba(0,0,0,0.2)] hover:bg-slate-700' : 'bg-gradient-to-r from-orange-500 to-rose-500 hover:scale-105'}`}
-        >
-          {isRightMenuExpanded ? <X className="w-6 h-6" /> : <MessageSquare className="w-6 h-6" />}
-        </button>
       </div>
     </div>
   );
@@ -955,7 +838,8 @@ const Dashboard = ({ shipments, onSelectShipment, onCreateNew, onBack }: {
   </div>
 );
 
-const CreateShipment = ({ onCancel, onSave }: { onCancel: () => void; onSave: (s: Shipment) => void }) => {
+const CreateShipment = ({ onCancel, onSave, profile }: { onCancel: () => void; onSave: (s: Shipment) => void; profile?: Profile | null }) => {
+  const [carriersList, setCarriersList] = useState<string[]>([]);
   const [mode, setMode] = useState<TransportMode>('Road');
   const [origin, setOrigin] = useState('Manaus (MAO)');
   const [destination, setDestination] = useState('Extrema (MG)');
@@ -1171,7 +1055,7 @@ const CreateShipment = ({ onCancel, onSave }: { onCancel: () => void; onSave: (s
                     className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 outline-none"
                   >
                     <option value="">Select Carrier...</option>
-                    {carriers.map(c => <option key={c} value={c}>{c}</option>)}
+                    {carriersList.map(c => <option key={c} value={c}>{c}</option>)}
                   </select>
                 </div>
                 <div>
@@ -1362,15 +1246,7 @@ const CreateShipment = ({ onCancel, onSave }: { onCancel: () => void; onSave: (s
             </button>
           </div>
 
-          <div className="bg-slate-900 rounded-2xl p-6 text-white overflow-hidden relative">
-            <div className="relative z-10">
-              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-1">Active Route</span>
-              <h3 className="font-bold text-lg">MAO Hub → Extrema Hub</h3>
-            </div>
-            <div className="absolute -right-4 -bottom-4 opacity-20">
-              <Truck className="w-24 h-24" />
-            </div>
-          </div>
+          {/* Removed Floating Card user requested */}
         </div>
       </div >
     </div >
@@ -1763,6 +1639,11 @@ const SettingsPanel = ({ onBack, currentUser }: { onBack: () => void, currentUse
   const [editingUser, setEditingUser] = useState<any>(null);
   const [newUserEmail, setNewUserEmail] = useState('');
   const [newUserRole, setNewUserRole] = useState<UserRole>('user');
+  const [newUserCompany, setNewUserCompany] = useState('');
+  const [companies, setCompanies] = useState<any[]>([]);
+  const [carriersList, setCarriersList] = useState<any[]>([]);
+  const [newCarrier, setNewCarrier] = useState('');
+
 
   const availableModules = [
     { id: 'dashboard', label: 'Shipments' },
@@ -3546,6 +3427,35 @@ export default function App() {
   const [session, setSession] = useState<any>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [permissions, setPermissions] = useState<ModuleAccess[]>([]);
+  const [isMenuExpanded, setIsMenuExpanded] = useState(false);
+  const [isRightMenuExpanded, setIsRightMenuExpanded] = useState(false);
+  const [chatMsg, setChatMsg] = useState('');
+  const [chatHistory, setChatHistory] = useState([
+    { role: 'ai', msg: 'Oi! Sou a Pam. Como posso analisar sua operação hoje?' }
+  ]);
+
+  const modules = [
+    { id: 'pam', title: 'Pam AI', desc: 'Assistente Inteligente', icon: Sparkles, color: 'bg-orange-50 text-orange-600', status: 'Active' },
+    { id: 'dashboard', title: 'Shipments', desc: 'Operational overview', icon: Truck, color: 'bg-emerald-50 text-emerald-600', status: 'Active' },
+    { id: 'routing', title: 'CargoFit / Routing', desc: 'Trailer occupation', icon: Route, color: 'bg-indigo-50 text-indigo-600', status: 'New' },
+    { id: 'freight-calc', title: 'Freight Control', desc: 'Cost optimization', icon: Calculator, color: 'bg-amber-50 text-amber-600', status: 'Static', noClick: true },
+    { id: 'fork-manager', title: 'ForkManager', desc: 'Fleet maintenance', icon: Zap, color: 'bg-orange-50 text-orange-600', status: 'Active' },
+    { id: 'payments', title: 'Payments', desc: 'Invoices & slips', icon: CreditCard, color: 'bg-rose-50 text-rose-600', status: 'Active' },
+    { id: 'docs', title: 'Documents', desc: 'SGI & contracts', icon: ShieldCheck, color: 'bg-cyan-50 text-cyan-600', status: 'Active' },
+    { id: 'fleet', title: 'Fleet Registry', desc: 'Vehicle loading', icon: Camera, color: 'bg-slate-100 text-slate-600', status: 'Active' },
+  ];
+
+  const hasAccess = (modId: string) => {
+    if (profile?.role === 'super-admin') return true;
+    return permissions.some(p => p.module_id === modId);
+  };
+  
+  const handleSendChat = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!chatMsg.trim()) return;
+    setChatHistory([...chatHistory, { role: 'user', msg: chatMsg }, { role: 'ai', msg: 'Anotado. Estou analisando seus dados, mas como sou uma IA demonstrativa, ainda não efetuo alterações profundas na sua base.' }]);
+    setChatMsg('');
+  };
   const [view, setView] = useState<'home' | 'dashboard' | 'freight-calc' | 'cargo-fit' | 'fork-manager' | 'payments' | 'docs' | 'routing' | 'fleet' | 'settings'>('home');
   const [activeTab, setActiveTab] = useState('home');
   const [shipments, setShipments] = useState<Shipment[]>([]);
@@ -3782,11 +3692,74 @@ export default function App() {
     return <Login onLogin={setSession} />;
   }
 
+  if (!profile) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+        <div className="flex flex-col items-center gap-4">
+          <div className="w-14 h-14 border-4 border-orange-500 border-t-transparent rounded-full animate-spin" />
+          <p className="text-slate-500 font-semibold text-sm">Carregando perfil...</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-slate-50 font-sans text-slate-900 selection:bg-blue-100 selection:text-blue-900">
       <Header activeTab={activeTab} onTabChange={handleTabChange} profile={profile} permissions={permissions} />
 
-      <main>
+      <main className="flex-1 w-full bg-[#fafafa] flex overflow-hidden max-h-[calc(100vh-64px)]">
+        {/* GLOBAL LEFT MENU */}
+        <div 
+          className={`${isMenuExpanded ? 'w-64' : 'w-20'} transition-all duration-300 ease-in-out bg-white border-r border-slate-100 shadow-[2px_0_15px_rgba(0,0,0,0.02)] flex flex-col items-center py-6 shrink-0 z-10 relative overflow-y-auto custom-scrollbar`}
+        >
+          <button 
+            onClick={() => setIsMenuExpanded(!isMenuExpanded)}
+            className="w-10 h-10 mb-8 rounded-2xl bg-orange-50 text-orange-600 flex items-center justify-center hover:bg-orange-100 transition-colors cursor-pointer shrink-0"
+          >
+            <Package className="w-5 h-5" />
+          </button>
+
+          <div className="flex flex-col gap-2 w-full px-3">
+            {modules.map((m) => {
+              const locked = !hasAccess(m.id);
+              return (
+                <button
+                  key={m.id}
+                  onClick={() => {
+                    if (!locked && !m.noClick) {
+                      setView(m.id as any);
+                      if (['dashboard', 'shipments', 'payments', 'reports', 'settings', 'fleet', 'routing', 'docs', 'fork-manager'].includes(m.id)) {
+                        setActiveTab(m.id === 'shipments' ? 'dashboard' : m.id);
+                      } else {
+                        setActiveTab('home');
+                      }
+                    }
+                  }}
+                  className={`flex items-center gap-4 w-full p-3 rounded-2xl transition-all cursor-pointer group hover:bg-slate-50
+                    ${locked || m.noClick ? 'opacity-40 grayscale' : ''}`}
+                >
+                  <div className="flex items-center justify-center shrink-0 w-8 h-8 transition-transform group-hover:scale-110">
+                    <m.icon className="w-5 h-5 text-slate-400 group-hover:text-orange-500 transition-colors" />
+                  </div>
+                  <AnimatePresence>
+                    {isMenuExpanded && (
+                      <motion.div 
+                        initial={{ opacity: 0, width: 0 }} 
+                        animate={{ opacity: 1, width: 'auto' }} 
+                        exit={{ opacity: 0, width: 0 }}
+                        className="flex flex-col items-start min-w-0 flex-1 whitespace-nowrap overflow-hidden"
+                      >
+                        <h3 className="text-sm font-semibold text-slate-700 truncate">{m.title}</h3>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </button>
+              )
+            })}
+          </div>
+        </div>
+        
+        <div className="flex-1 overflow-y-auto custom-scrollbar relative">
         <AnimatePresence mode="wait">
           {view === 'home' && (
             <motion.div
@@ -3935,6 +3908,54 @@ export default function App() {
             </motion.div>
           )}
         </AnimatePresence>
+        </div>
+
+        {/* Global Right Pam Chat Menu */}
+        <div 
+          className={`${isRightMenuExpanded ? 'w-[340px]' : 'w-0'} transition-all duration-300 ease-in-out bg-white border-l border-slate-100 shadow-[-2px_0_15px_rgba(0,0,0,0.02)] flex flex-col shrink-0 z-40 relative overflow-hidden`}
+        >
+          <div className="w-[340px] flex flex-col h-full right-0">
+            <div className="px-5 py-4 bg-white border-b border-slate-100 flex items-center gap-3 relative shrink-0">
+              <div className="w-8 h-8 rounded-[12px] bg-gradient-to-br from-orange-400 to-rose-500 flex items-center justify-center text-white shadow-sm">
+                <Sparkles className="w-4 h-4" />
+              </div>
+              <div className="flex-1">
+                <p className="text-sm font-bold tracking-tight text-slate-800">Pam</p>
+                <p className="text-[10px] text-slate-400 font-medium tracking-widest uppercase">Assistente Rápida</p>
+              </div>
+              <button onClick={() => setIsRightMenuExpanded(false)} className="w-8 h-8 rounded-full flex items-center justify-center hover:bg-slate-100 text-slate-400 transition-colors cursor-pointer shrink-0">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            
+            <div className="flex-1 p-4 overflow-y-auto space-y-4 custom-scrollbar text-xs bg-[#fafafa]">
+              {chatHistory.map((c, i) => (
+                <div key={i} className={`flex gap-3 ${c.role === 'ai' ? 'justify-start' : 'justify-end'}`}>
+                  {c.role === 'ai' && (
+                    <div className="w-6 h-6 rounded-full bg-gradient-to-br from-orange-400 to-rose-500 flex items-center justify-center text-white shrink-0 shadow-sm mt-0.5">
+                      <Sparkles className="w-3 h-3" />
+                    </div>
+                  )}
+                  <div className={`px-4 py-2.5 rounded-2xl max-w-[85%] leading-relaxed shadow-sm font-medium ${c.role === 'ai' ? 'bg-white border border-slate-100 text-slate-700 rounded-tl-none' : 'bg-slate-800 text-white rounded-tr-none'}`}>
+                    {c.msg}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <form onSubmit={handleSendChat} className="p-3 bg-white border-t border-slate-100 flex gap-2 shrink-0">
+               <input
+                 value={chatMsg}
+                 onChange={e => setChatMsg(e.target.value)}
+                 placeholder="Perguntar à Pam..."
+                 className="flex-1 bg-slate-100 text-xs font-medium outline-none rounded-xl px-4 py-2 text-slate-700 placeholder:text-slate-400 focus:ring-2 focus:ring-orange-500/30 transition-shadow"
+               />
+               <button disabled={!chatMsg.trim()} type="submit" className="w-9 h-9 shrink-0 rounded-xl bg-slate-800 text-white flex items-center justify-center hover:bg-slate-700 disabled:opacity-50 transition-colors shadow-sm active:scale-95 cursor-pointer">
+                 <Send className="w-3 h-3 ml-0.5" />
+               </button>
+            </form>
+          </div>
+        </div>
 
         {showStatusModal && selectedShipment && (
           <StatusUpdateModal
@@ -3943,6 +3964,15 @@ export default function App() {
             onUpdate={handleUpdateStatus}
           />
         )}
+      
+        <div className="fixed bottom-6 right-6 z-50">
+          <button 
+            onClick={() => setIsRightMenuExpanded(!isRightMenuExpanded)}
+            className={`w-14 h-14 rounded-full flex items-center justify-center text-white transition-all duration-300 shadow-[0_8px_20px_rgba(249,115,22,0.4)] active:scale-95 cursor-pointer ${isRightMenuExpanded ? 'bg-slate-800 shadow-[0_8px_20px_rgba(0,0,0,0.2)] hover:bg-slate-700' : 'bg-gradient-to-r from-orange-500 to-rose-500 hover:scale-105'}`}
+          >
+            {isRightMenuExpanded ? <X className="w-6 h-6" /> : <MessageSquare className="w-6 h-6" />}
+          </button>
+        </div>
       </main>
 
       <footer className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 border-t border-slate-200 mt-12">
