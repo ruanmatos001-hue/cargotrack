@@ -48,7 +48,8 @@ import {
   MessageSquare,
   Bot,
   Send,
-  Sparkles
+  Sparkles,
+  Edit2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -107,6 +108,8 @@ interface Shipment {
   invoices: { nf: string; value: string }[];
   invoiceFileUrl?: string;
   invoiceFileName?: string;
+  shipName?: string;
+  sszArrivalDate?: string;
 }
 
 interface Payment {
@@ -115,10 +118,11 @@ interface Payment {
   type: 'monthly' | 'extra';
   document_type: 'NF' | 'ND';
   document_number?: string;
+  title?: string;
   amount: number;
   description: string;
   due_date: string;
-  status: 'pending' | 'paid' | 'overdue';
+  status: 'pending' | 'paid' | 'overdue' | 'in_progress';
   paid_at?: string;
   created_at: string;
 }
@@ -838,8 +842,101 @@ const Dashboard = ({ shipments, onSelectShipment, onCreateNew, onBack }: {
   </div>
 );
 
+const CarrierManagerModal = ({ onClose, profile, onCarriersChange }: {
+  onClose: () => void;
+  profile: Profile | null;
+  onCarriersChange: (list: string[]) => void;
+}) => {
+  const [carriers, setCarriers] = React.useState<{ id: string; name: string; is_global: boolean; company_id?: string }[]>([]);
+  const [newName, setNewName] = React.useState('');
+  const [loading, setLoading] = React.useState(true);
+  const canManage = profile?.role === 'super-admin' || profile?.role === 'company-admin';
+
+  const fetchCarriersModal = async () => {
+    setLoading(true);
+    try {
+      let q = supabase.from('carriers').select('*').order('name');
+      if (profile?.role !== 'super-admin' && profile?.company_id) {
+        q = (q as any).or(`company_id.eq.${profile.company_id},is_global.eq.true`);
+      }
+      const { data } = await q;
+      const list = data || [];
+      setCarriers(list);
+      onCarriersChange(list.map((c: any) => c.name));
+    } catch (e) { console.error(e); }
+    setLoading(false);
+  };
+
+  React.useEffect(() => { fetchCarriersModal(); }, []);
+
+  const handleAdd = async () => {
+    if (!newName.trim() || !canManage) return;
+    try {
+      await supabase.from('carriers').insert([{
+        name: newName.trim(),
+        company_id: profile?.role === 'super-admin' ? null : profile?.company_id,
+        is_global: profile?.role === 'super-admin'
+      }]);
+      setNewName('');
+      fetchCarriersModal();
+    } catch (e) { alert('Erro ao adicionar transportadora'); }
+  };
+
+  const handleDeleteCarrier = async (id: string) => {
+    if (!canManage || !confirm('Confirmar exclusão?')) return;
+    await supabase.from('carriers').delete().eq('id', id);
+    fetchCarriersModal();
+  };
+
+  return (
+    <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+      <div className="bg-white rounded-3xl w-full max-w-md shadow-2xl overflow-hidden">
+        <div className="p-5 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+          <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2"><Truck className="w-4 h-4 text-orange-500" /> Gerenciar Transportadoras</h3>
+          <button onClick={onClose} className="p-2 hover:bg-slate-200 rounded-full text-slate-400 text-xl font-bold">×</button>
+        </div>
+        <div className="p-5">
+          {canManage && (
+            <div className="flex gap-2 mb-4">
+              <input
+                type="text"
+                placeholder="Nome da transportadora..."
+                value={newName}
+                onChange={e => setNewName(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && handleAdd()}
+                className="flex-1 bg-slate-50 border border-slate-200 rounded-xl py-2.5 px-4 text-sm outline-none focus:ring-2 focus:ring-orange-500"
+              />
+              <button onClick={handleAdd} className="px-4 py-2 bg-orange-500 text-white rounded-xl font-bold text-sm hover:bg-orange-600 transition-colors">
+                <Plus className="w-4 h-4" />
+              </button>
+            </div>
+          )}
+          <div className="space-y-2 max-h-64 overflow-y-auto">
+            {loading ? (
+              <p className="text-slate-400 text-sm text-center py-4">Carregando...</p>
+            ) : carriers.length === 0 ? (
+              <p className="text-slate-400 text-sm text-center py-4">Nenhuma transportadora cadastrada</p>
+            ) : carriers.map(c => (
+              <div key={c.id} className="flex items-center justify-between gap-3 p-3 bg-slate-50 rounded-xl border border-slate-100">
+                <div>
+                  <p className="text-sm font-semibold text-slate-800">{c.name}</p>
+                  {c.is_global && <span className="text-[10px] text-orange-500 font-bold uppercase">Global</span>}
+                </div>
+                {canManage && (profile?.role === 'super-admin' || !c.is_global) && (
+                  <button onClick={() => handleDeleteCarrier(c.id)} className="p-1.5 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors">
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const CreateShipment = ({ onCancel, onSave, profile }: { onCancel: () => void; onSave: (s: Shipment) => void; profile?: Profile | null }) => {
-  const [carriersList, setCarriersList] = useState<string[]>([]);
   const [mode, setMode] = useState<TransportMode>('Road');
   const [origin, setOrigin] = useState('Manaus (MAO)');
   const [destination, setDestination] = useState('Extrema (MG)');
@@ -854,6 +951,10 @@ const CreateShipment = ({ onCancel, onSave, profile }: { onCancel: () => void; o
   const [trackingTag, setTrackingTag] = useState('');
   const [invoiceFile, setInvoiceFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [shipName, setShipName] = useState('');
+  const [sszArrivalDate, setSszArrivalDate] = useState('');
+  const [showCarrierModal, setShowCarrierModal] = useState(false);
+  const [carriersList, setCarriersList] = useState<string[]>(['LLS ESSENCIAL TRANSPORTES','MVM TRANSPORTES','TRAGETTA - FL BRASIL','BERTOLINE TRANSPORTES LTDA','MERCOSUL LINE']);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
@@ -861,12 +962,18 @@ const CreateShipment = ({ onCancel, onSave, profile }: { onCancel: () => void; o
     }
   };
 
-  const carriers = [
-    'LLS ESSENCIAL TRANSPORTES',
-    'MVM TRANSPORTES',
-    'TRAGETTA - FL BRASIL',
-    'BERTOLINE TRANSPORTES LTDA'
-  ];
+  // fetch carriers from DB on mount
+  React.useEffect(() => {
+    const fetchCarriersDB = async () => {
+      try {
+        const { data } = await supabase.from('carriers').select('name').order('name');
+        if (data && data.length > 0) {
+          setCarriersList(data.map((c: any) => c.name));
+        }
+      } catch (e) { /* keep fallback */ }
+    };
+    fetchCarriersDB();
+  }, []);
 
   const handleSave = async () => {
     const config = MODAL_CONFIGS[mode];
@@ -938,6 +1045,8 @@ const CreateShipment = ({ onCancel, onSave, profile }: { onCancel: () => void; o
         seals,
         booking,
         trackingTag,
+        shipName: mode === 'Maritime' ? shipName : undefined,
+        sszArrivalDate: mode === 'Maritime' ? sszArrivalDate : undefined,
         invoices: [], // Empty since we are using files now
         invoiceFileUrl,
         invoiceFileName,
@@ -953,6 +1062,7 @@ const CreateShipment = ({ onCancel, onSave, profile }: { onCancel: () => void; o
   };
 
   return (
+    <>
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
       <div className="flex items-center gap-4 mb-8">
         <button onClick={onCancel} className="p-2 hover:bg-slate-100 rounded-full transition-colors">
@@ -1048,7 +1158,12 @@ const CreateShipment = ({ onCancel, onSave, profile }: { onCancel: () => void; o
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
                 <div>
-                  <label className="text-xs font-bold text-slate-400 uppercase tracking-widest block mb-2">Carrier Service</label>
+                  <div className="flex justify-between items-center mb-2">
+                    <label className="text-xs font-bold text-slate-400 uppercase tracking-widest">Carrier Service</label>
+                    <button type="button" onClick={() => setShowCarrierModal(true)} className="text-[10px] font-bold text-blue-500 hover:text-blue-700 flex items-center gap-1 uppercase">
+                      <Settings className="w-3 h-3" /> Gerenciar
+                    </button>
+                  </div>
                   <select
                     value={carrier}
                     onChange={(e) => setCarrier(e.target.value)}
@@ -1165,6 +1280,40 @@ const CreateShipment = ({ onCancel, onSave, profile }: { onCancel: () => void; o
                 </div>
               </div>
 
+              {/* Maritime-specific fields */}
+              {mode === 'Maritime' && (
+                <div className="p-4 bg-blue-50 rounded-xl border border-blue-100 space-y-4">
+                  <div className="flex items-center gap-2">
+                    <Ship className="w-4 h-4 text-blue-600" />
+                    <p className="text-xs font-bold text-blue-700 uppercase tracking-widest">Dados de Cabotagem</p>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="text-xs font-bold text-slate-400 uppercase tracking-widest block mb-2">Nome do Navio <span className="text-red-500">*</span></label>
+                      <input
+                        type="text"
+                        required={mode === 'Maritime'}
+                        value={shipName}
+                        onChange={(e) => setShipName(e.target.value)}
+                        placeholder="Ex: MSC Amalfi"
+                        className="w-full p-3 bg-white border border-blue-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs font-bold text-slate-400 uppercase tracking-widest block mb-2">Chegada SSZ - Santos <span className="text-red-500">*</span></label>
+                      <input
+                        type="date"
+                        required={mode === 'Maritime'}
+                        value={sszArrivalDate}
+                        onChange={(e) => setSszArrivalDate(e.target.value)}
+                        className="w-full p-3 bg-white border border-blue-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                      <p className="text-[10px] text-blue-500 mt-1 font-medium">+3 dias para liberação de agendamento</p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
                 <div className="col-span-full">
                   <label className="text-xs font-bold text-slate-400 uppercase tracking-widest block mb-2">Departure Date</label>
@@ -1250,6 +1399,15 @@ const CreateShipment = ({ onCancel, onSave, profile }: { onCancel: () => void; o
         </div>
       </div >
     </div >
+
+      {showCarrierModal && (
+        <CarrierManagerModal
+          onClose={() => setShowCarrierModal(false)}
+          profile={profile || null}
+          onCarriersChange={(list) => setCarriersList(list)}
+        />
+      )}
+    </>
   );
 };
 
@@ -2011,14 +2169,16 @@ const PaymentsPanel = ({ onBack, profile }: { onBack: () => void, profile: Profi
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [filterPaid, setFilterPaid] = useState(true);
 
-  const [newPayment, setNewPayment] = useState({
+  const [newPayment, setNewPayment] = useState<any>({
     type: 'monthly',
     document_type: 'NF',
     document_number: '',
+    title: '',
     amount: '',
     description: '',
     due_date: new Date().toISOString().split('T')[0]
   });
+  const [editPayment, setEditPayment] = useState<Payment | null>(null);
 
   const fetchPayments = async () => {
     setLoading(true);
@@ -2047,6 +2207,7 @@ const PaymentsPanel = ({ onBack, profile }: { onBack: () => void, profile: Profi
         type: newPayment.type,
         document_type: newPayment.document_type,
         document_number: newPayment.document_number,
+        title: newPayment.title,
         amount: parseFloat(newPayment.amount),
         description: newPayment.description,
         due_date: newPayment.due_date,
@@ -2060,6 +2221,7 @@ const PaymentsPanel = ({ onBack, profile }: { onBack: () => void, profile: Profi
         type: 'monthly',
         document_type: 'NF',
         document_number: '',
+        title: '',
         amount: '',
         description: '',
         due_date: new Date().toISOString().split('T')[0]
@@ -2086,6 +2248,8 @@ const PaymentsPanel = ({ onBack, profile }: { onBack: () => void, profile: Profi
         await supabase.from('payments').insert([{
           type: 'monthly',
           document_type: paymentToUpdate.document_type,
+          document_number: paymentToUpdate.document_number,
+          title: paymentToUpdate.title,
           amount: paymentToUpdate.amount,
           description: paymentToUpdate.description,
           due_date: nextDue.toISOString().split('T')[0],
@@ -2100,8 +2264,38 @@ const PaymentsPanel = ({ onBack, profile }: { onBack: () => void, profile: Profi
     }
   };
 
+  const markAsInProgress = async (id: string) => {
+    try {
+      const { error } = await supabase.from('payments').update({ status: 'in_progress' }).eq('id', id);
+      if (error) throw error;
+      fetchPayments();
+    } catch { alert('Error updating status'); }
+  };
+
+  const handleEditSave = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editPayment) return;
+    try {
+      const { error } = await supabase.from('payments')
+        .update({
+          title: editPayment.title,
+          document_type: editPayment.document_type,
+          document_number: editPayment.document_number,
+          amount: editPayment.amount,
+          description: editPayment.description,
+          due_date: editPayment.due_date,
+          type: editPayment.type,
+        })
+        .eq('id', editPayment.id);
+      if (error) throw error;
+      setEditPayment(null);
+      fetchPayments();
+    } catch { alert('Error saving payment'); }
+  };
+
   const getStatusDetails = (payment: Payment) => {
-    if (payment.status === 'paid') return { label: 'Paid', color: 'bg-emerald-100 text-emerald-600', icon: CheckCircle2 };
+    if (payment.status === 'paid') return { label: 'Pago', color: 'bg-emerald-100 text-emerald-600', icon: CheckCircle2 };
+    if (payment.status === 'in_progress') return { label: 'Em Aprovação', color: 'bg-violet-100 text-violet-600', icon: Clock };
 
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -2206,7 +2400,7 @@ const PaymentsPanel = ({ onBack, profile }: { onBack: () => void, profile: Profi
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="bg-slate-50 border-b border-slate-100">
-                <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Document</th>
+                <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Título / Doc</th>
                 <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Type</th>
                 <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Due Date</th>
                 <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Amount</th>
@@ -2229,7 +2423,7 @@ const PaymentsPanel = ({ onBack, profile }: { onBack: () => void, profile: Profi
                           <FileText className="w-4 h-4 text-slate-500" />
                         </div>
                         <div>
-                          <p className="text-sm font-bold text-slate-900">{p.document_type} {p.document_number || '---'}</p>
+                          <p className="text-sm font-bold text-slate-900">{p.title || `${p.document_type} ${p.document_number || '---'}`}</p>
                           <p className="text-[10px] text-slate-400 truncate max-w-[200px]">{p.description}</p>
                         </div>
                       </div>
@@ -2256,20 +2450,27 @@ const PaymentsPanel = ({ onBack, profile }: { onBack: () => void, profile: Profi
                       </div>
                     </td>
                     <td className="px-6 py-4 text-right">
-                      {p.status === 'pending' && (
-                        <button
-                          onClick={() => markAsPaid(p.id)}
-                          className="px-3 py-1.5 bg-emerald-50 text-emerald-600 rounded-lg text-[10px] font-bold uppercase hover:bg-emerald-100 transition-colors"
-                        >
-                          Mark as Paid
-                        </button>
-                      )}
-                      {p.status === 'paid' && (
-                        <div className="text-[10px] text-slate-400 font-medium">
-                          Paid on {new Date(p.paid_at!).toLocaleDateString('pt-BR')}
-                        </div>
-                      )}
-                    </td>
+                       <div className="flex items-center gap-2 justify-end flex-wrap">
+                         <button onClick={() => setEditPayment(p)} className="p-1.5 bg-slate-100 text-slate-500 rounded-lg hover:bg-slate-200 transition-colors" title="Editar">
+                           <Edit2 className="w-3 h-3" />
+                         </button>
+                         {p.status === 'pending' && (
+                           <button onClick={() => markAsInProgress(p.id)} className="px-2 py-1.5 bg-violet-50 text-violet-600 rounded-lg text-[10px] font-bold hover:bg-violet-100 transition-colors whitespace-nowrap">
+                             Em Aprovação
+                           </button>
+                         )}
+                         {(p.status === 'pending' || p.status === 'in_progress') && (
+                           <button onClick={() => markAsPaid(p.id)} className="px-2 py-1.5 bg-emerald-50 text-emerald-600 rounded-lg text-[10px] font-bold hover:bg-emerald-100 transition-colors whitespace-nowrap">
+                             Marcar Pago
+                           </button>
+                         )}
+                         {p.status === 'paid' && (
+                           <div className="text-[10px] text-slate-400 font-medium whitespace-nowrap">
+                             Pago {p.paid_at ? new Date(p.paid_at).toLocaleDateString('pt-BR') : ''}
+                           </div>
+                         )}
+                       </div>
+                     </td>
                   </tr>
                 );
               })}
@@ -2287,6 +2488,17 @@ const PaymentsPanel = ({ onBack, profile }: { onBack: () => void, profile: Profi
             </div>
 
             <form onSubmit={handleCreate} className="p-8 space-y-6">
+              <div className="space-y-2">
+                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Título do Pagamento</label>
+                <input
+                  type="text"
+                  placeholder="Ex: Frete NF 001 - Janeiro"
+                  value={newPayment.title}
+                  onChange={(e) => setNewPayment({ ...newPayment, title: e.target.value })}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 px-4 text-sm outline-none"
+                />
+              </div>
+
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Payment Type</label>
@@ -2370,6 +2582,54 @@ const PaymentsPanel = ({ onBack, profile }: { onBack: () => void, profile: Profi
               </div>
             </form>
           </motion.div>
+        </div>
+      )}
+
+      {/* Edit Payment Modal */}
+      {editPayment && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+          <div className="bg-white rounded-3xl w-full max-w-xl shadow-2xl overflow-hidden">
+            <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
+              <h3 className="text-xl font-bold text-slate-900">Editar Pagamento</h3>
+              <button onClick={() => setEditPayment(null)} className="p-2 hover:bg-slate-200 rounded-full text-slate-400 text-xl font-bold">×</button>
+            </div>
+            <form onSubmit={handleEditSave} className="p-8 space-y-4">
+              <div>
+                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1 block mb-1">Título</label>
+                <input type="text" value={editPayment.title || ''} onChange={e => setEditPayment({...editPayment, title: e.target.value})} className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 px-4 text-sm outline-none" placeholder="Título do pagamento" />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1 block mb-1">Tipo Doc.</label>
+                  <select value={editPayment.document_type} onChange={e => setEditPayment({...editPayment, document_type: e.target.value as any})} className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 px-4 text-sm outline-none">
+                    <option value="NF">NF</option><option value="ND">ND</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1 block mb-1">Nº Documento</label>
+                  <input type="text" value={editPayment.document_number || ''} onChange={e => setEditPayment({...editPayment, document_number: e.target.value})} className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 px-4 text-sm outline-none" />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1 block mb-1">Valor (R$)</label>
+                  <input type="number" step="0.01" value={editPayment.amount} onChange={e => setEditPayment({...editPayment, amount: parseFloat(e.target.value)})} className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 px-4 text-sm outline-none" />
+                </div>
+                <div>
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1 block mb-1">Vencimento</label>
+                  <input type="date" value={editPayment.due_date} onChange={e => setEditPayment({...editPayment, due_date: e.target.value})} className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 px-4 text-sm outline-none" />
+                </div>
+              </div>
+              <div>
+                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1 block mb-1">Descrição</label>
+                <textarea value={editPayment.description || ''} onChange={e => setEditPayment({...editPayment, description: e.target.value})} className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 px-4 text-sm outline-none h-20 resize-none" />
+              </div>
+              <div className="flex gap-3 pt-2">
+                <button type="button" onClick={() => setEditPayment(null)} className="flex-1 py-3 text-sm font-bold text-slate-500 hover:bg-slate-100 rounded-xl transition-all">Cancelar</button>
+                <button type="submit" className="flex-[2] py-3 bg-blue-600 text-white text-sm font-bold rounded-xl hover:bg-blue-700 transition-all">Salvar Alterações</button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
     </div>
