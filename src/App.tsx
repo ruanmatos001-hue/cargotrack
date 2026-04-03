@@ -49,7 +49,8 @@ import {
   Bot,
   Send,
   Sparkles,
-  Edit2
+  Edit2,
+  Pencil
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -704,6 +705,407 @@ const ForkManager = ({ onBack }: { onBack: () => void }) => (
     </div>
   </div>
 );
+
+const DailySchedulePanel = ({ onBack, profile }: { onBack: () => void; profile: Profile | null }) => {
+  type CardType = {
+    id: string;
+    column_id: string;
+    carrier: string;
+    client: string;
+    volumetry: string;
+    labeled: boolean;
+    in_yard: boolean;
+    separated: boolean;
+    loaded: boolean;
+    released: boolean;
+    notes: string;
+    position: number;
+    _local?: boolean;
+  };
+  type ColType = { id: string; title: string; day_index: number; week_key: string; position: number; cards: CardType[]; _local?: boolean };
+
+  const DAY_NAMES = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
+
+  const buildWeek = (weekOffset: number) => {
+    const today = new Date();
+    // Get Monday of current week (handle Sunday=0 edge case)
+    const dow = today.getDay() === 0 ? 7 : today.getDay();
+    const monday = new Date(today);
+    monday.setDate(today.getDate() - dow + 1 + weekOffset * 7);
+
+    // Build week key
+    const yr = monday.getFullYear();
+    const startOfYear = new Date(yr, 0, 1);
+    const wn = Math.ceil(((monday.getTime() - startOfYear.getTime()) / 86400000 + startOfYear.getDay() + 1) / 7);
+    const weekKey = `${yr}-W${wn.toString().padStart(2, '0')}`;
+
+    const days = Array.from({ length: 7 }, (_, i) => {
+      const d = new Date(monday);
+      d.setDate(monday.getDate() + i);
+      const dd = d.getDate().toString().padStart(2, '0');
+      const mm = (d.getMonth() + 1).toString().padStart(2, '0');
+      const name = DAY_NAMES[d.getDay()];
+      const isToday = d.toDateString() === today.toDateString();
+      return { label: isToday ? `Hoje · ${name}` : `${name} ${dd}/${mm}`, date: d, isToday };
+    });
+
+    const fmt = (d: Date) => `${d.getDate().toString().padStart(2,'0')}/${(d.getMonth()+1).toString().padStart(2,'0')}`;
+    const sunday = new Date(monday); sunday.setDate(monday.getDate() + 6);
+    const label = weekOffset === 0 ? '📅 Esta semana' : `${fmt(monday)} – ${fmt(sunday)}`;
+
+    return { weekKey, days, label };
+  };
+
+  const companyId = profile?.company_id || null;
+  const [weekOffset, setWeekOffset] = useState(0);
+  const [columns, setColumns] = useState<ColType[]>([]);
+  const [syncing, setSyncing] = useState(false);
+  const [editingCardId, setEditingCardId] = useState<string | null>(null);
+  const [saving, setSaving] = useState<string | null>(null);
+  const [draggedCard, setDraggedCard] = useState<{ colId: string; cardId: string } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const { weekKey, days, label: weekLabel } = buildWeek(weekOffset);
+
+  // Build local skeleton columns for the week immediately (no DB needed to render)
+  const buildLocalColumns = (wKey: string, dayList: typeof days): ColType[] =>
+    dayList.map((d, i) => ({
+      id: `local-${wKey}-${i}`,
+      title: d.label,
+      day_index: i,
+      week_key: wKey,
+      position: i,
+      cards: [],
+      _local: true,
+    }));
+
+  const loadWeek = async (wKey: string, dayList: typeof days) => {
+    // 1. Immediately show local skeleton so board is never blank
+    setColumns(buildLocalColumns(wKey, dayList));
+    setError(null);
+    setSyncing(true);
+    setEditingCardId(null);
+
+    try {
+      // 2. Try to upsert 7 columns for this week into DB
+      const toUpsert = dayList.map((d, i) => ({
+        title: d.label,
+        position: i,
+        day_index: i,
+        week_key: wKey,
+        company_id: companyId,
+      }));
+
+      const { data: upsertedCols, error: upsertErr } = await supabase
+        .from('daily_schedule_columns')
+        .upsert(toUpsert, { onConflict: 'week_key,day_index,company_id' })
+        .select();
+
+      // If upsert fails, try plain insert then select
+      let cols: any[] = upsertedCols || [];
+      if (upsertErr || cols.length === 0) {
+        // Try fetching existing
+        const { data: existing } = await supabase
+          .from('daily_schedule_columns')
+          .select('*')
+          .eq('week_key', wKey)
+          .order('position');
+        
+        if (existing && existing.length > 0) {
+          cols = existing;
+        } else {
+          // plain insert one by one
+          cols = [];
+          for (const row of toUpsert) {
+            const { data: ins } = await supabase.from('daily_schedule_columns').insert([row]).select().single();
+            if (ins) cols.push(ins);
+          }
+        }
+      }
+
+      if (cols.length === 0) {
+        // Stay with local skeleton, show soft warning
+        setError('Modo offline — alterações não serão salvas no banco.');
+        setSyncing(false);
+        return;
+      }
+
+      // 3. Load cards for these columns
+      const colIds = cols.map((c: any) => c.id);
+      const { data: cards } = await supabase
+        .from('daily_schedule_cards')
+        .select('*')
+        .in('column_id', colIds)
+        .order('position');
+
+      const mapped: ColType[] = cols
+        .sort((a: any, b: any) => a.position - b.position)
+        .map((c: any) => ({
+          ...c,
+          cards: (cards || []).filter((ca: any) => ca.column_id === c.id),
+        }));
+
+      setColumns(mapped);
+    } catch (e: any) {
+      setError('Erro ao conectar com o banco. Trabalhando offline.');
+      console.error('loadWeek error:', e);
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  useEffect(() => { loadWeek(weekKey, days); }, [weekOffset]);
+
+  const addCard = async (col: ColType) => {
+    const newLocal: CardType = {
+      id: `local-card-${Date.now()}`,
+      column_id: col.id,
+      carrier: '', client: '', volumetry: '',
+      labeled: false, in_yard: false, separated: false, loaded: false, released: false,
+      notes: '', position: col.cards.length, _local: true,
+    };
+    setColumns(prev => prev.map(c => c.id === col.id ? { ...c, cards: [...c.cards, newLocal] } : c));
+    setEditingCardId(newLocal.id);
+
+    if (!col._local) {
+      const { data, error } = await supabase.from('daily_schedule_cards').insert([{
+        column_id: col.id, company_id: companyId,
+        carrier: '', client: '', volumetry: '',
+        labeled: false, in_yard: false, separated: false, loaded: false, released: false,
+        notes: '', position: col.cards.length
+      }]).select().single();
+      if (!error && data) {
+        setEditingCardId(data.id);
+        setColumns(prev => prev.map(c => c.id === col.id ? {
+          ...c,
+          cards: c.cards.map(ca => ca.id === newLocal.id ? data : ca)
+        } : c));
+      }
+    }
+  };
+
+  const updateCard = async (cardId: string, field: string, value: any) => {
+    setColumns(prev => prev.map(c => ({
+      ...c, cards: c.cards.map(ca => ca.id === cardId ? { ...ca, [field]: value } : ca)
+    })));
+    const card = columns.flatMap(c => c.cards).find(ca => ca.id === cardId);
+    if (card?._local) return;
+    setSaving(cardId);
+    await supabase.from('daily_schedule_cards').update({ [field]: value }).eq('id', cardId);
+    setSaving(null);
+  };
+
+  const deleteCard = async (cardId: string, colId: string) => {
+    const card = columns.flatMap(c => c.cards).find(ca => ca.id === cardId);
+    setColumns(prev => prev.map(c => c.id === colId ? { ...c, cards: c.cards.filter(ca => ca.id !== cardId) } : c));
+    if (editingCardId === cardId) setEditingCardId(null);
+    if (!card?._local) await supabase.from('daily_schedule_cards').delete().eq('id', cardId);
+  };
+
+  const handleDragStart = (e: React.DragEvent, colId: string, cardId: string) => {
+    setDraggedCard({ colId, cardId });
+    e.dataTransfer.effectAllowed = 'move';
+  };
+  const handleDragOver = (e: React.DragEvent) => { e.preventDefault(); };
+  const handleDrop = async (e: React.DragEvent, targetColId: string) => {
+    e.preventDefault();
+    if (!draggedCard || draggedCard.colId === targetColId) { setDraggedCard(null); return; }
+    const srcCol = columns.find(c => c.id === draggedCard.colId);
+    const card = srcCol?.cards.find(ca => ca.id === draggedCard.cardId);
+    if (!card) { setDraggedCard(null); return; }
+    setColumns(prev => prev.map(c => {
+      if (c.id === draggedCard.colId) return { ...c, cards: c.cards.filter(ca => ca.id !== draggedCard.cardId) };
+      if (c.id === targetColId) return { ...c, cards: [...c.cards, { ...card, column_id: targetColId }] };
+      return c;
+    }));
+    if (!card._local) await supabase.from('daily_schedule_cards').update({ column_id: targetColId }).eq('id', draggedCard.cardId);
+    setDraggedCard(null);
+  };
+
+  const BoolBtn = ({ label, value, cardId, field }: { label: string; value: boolean; cardId: string; field: string }) => (
+    <button
+      onClick={() => updateCard(cardId, field, !value)}
+      className={`flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-bold uppercase transition-all border ${value ? 'bg-emerald-100 text-emerald-700 border-emerald-200' : 'bg-white text-slate-400 border-slate-200 hover:border-slate-300'}`}
+    >
+      {value ? <CheckCircle2 className="w-2.5 h-2.5" /> : <X className="w-2.5 h-2.5" />}
+      {label}
+    </button>
+  );
+
+  return (
+    <div className="px-4 py-4 h-[calc(100vh-64px)] flex flex-col overflow-hidden bg-slate-50">
+      {/* Header */}
+      <div className="flex items-center justify-between mb-4 shrink-0">
+        <div className="flex items-center gap-3">
+          <button onClick={onBack} className="p-1.5 hover:bg-white rounded-lg transition-colors border border-transparent hover:border-slate-200">
+            <ArrowLeft className="w-4 h-4 text-slate-500" />
+          </button>
+          <div>
+            <div className="flex items-center gap-2">
+              <h1 className="text-base font-bold text-slate-900">Programação Diária</h1>
+              {syncing && <span className="text-[10px] text-blue-500 animate-pulse font-medium">● sincronizando...</span>}
+            </div>
+            <p className="text-[11px] text-slate-400">Arraste para mover · Clique <Pencil className="w-2.5 h-2.5 inline" /> para editar · Salvo no banco automaticamente</p>
+          </div>
+        </div>
+        {/* Week navigator */}
+        <div className="flex items-center gap-1 bg-white border border-slate-200 rounded-xl px-2 py-1">
+          <button onClick={() => setWeekOffset(w => w - 1)} className="p-1 rounded-lg hover:bg-slate-100 transition-colors text-slate-500">
+            <ChevronRight className="w-4 h-4 rotate-180" />
+          </button>
+          <button onClick={() => setWeekOffset(0)} className="text-xs font-bold text-slate-700 hover:text-blue-600 px-2 transition-colors min-w-[120px] text-center">
+            {weekLabel}
+          </button>
+          <button onClick={() => setWeekOffset(w => w + 1)} className="p-1 rounded-lg hover:bg-slate-100 transition-colors text-slate-500">
+            <ChevronRight className="w-4 h-4" />
+          </button>
+        </div>
+      </div>
+
+      {error && (
+        <div className="mb-3 shrink-0 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 flex items-center gap-2">
+          <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0" />
+          <p className="text-xs text-amber-700 font-medium">{error}</p>
+          <button onClick={() => loadWeek(weekKey, days)} className="ml-auto text-xs font-bold text-amber-600 hover:text-amber-800">Tentar novamente</button>
+        </div>
+      )}
+
+      {/* Kanban board */}
+      <div className="flex gap-3 overflow-x-auto flex-1 min-h-0 pb-2" style={{ alignItems: 'flex-start' }}>
+        {columns.map(col => {
+          const isDragTarget = draggedCard && draggedCard.colId !== col.id;
+          const today = new Date().toDateString();
+          const isToday = days[col.position]?.date.toDateString() === today;
+
+          return (
+            <div
+              key={col.id}
+              className={`w-[195px] shrink-0 flex flex-col rounded-xl border transition-all duration-150 ${
+                isDragTarget ? 'border-blue-400 border-dashed bg-blue-50/60 scale-[1.01]' :
+                isToday ? 'border-blue-300 bg-white shadow-md' :
+                'border-slate-200 bg-white shadow-sm'
+              }`}
+              onDragOver={handleDragOver}
+              onDrop={(e) => handleDrop(e, col.id)}
+            >
+              {/* Column header */}
+              <div className={`px-3 py-2 rounded-t-xl border-b flex items-center justify-between ${isToday ? 'bg-blue-600 border-blue-600' : 'bg-slate-50 border-slate-100'}`}>
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <span className={`text-[11px] font-extrabold truncate leading-tight ${isToday ? 'text-white' : 'text-slate-700'}`}>{col.title}</span>
+                  <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full shrink-0 ${isToday ? 'bg-white/25 text-white' : 'bg-slate-200 text-slate-500'}`}>{col.cards.length}</span>
+                </div>
+                <button
+                  onClick={() => addCard(col)}
+                  className={`shrink-0 w-5 h-5 flex items-center justify-center rounded-md transition-colors ${isToday ? 'text-white/80 hover:bg-white/20 hover:text-white' : 'text-slate-400 hover:bg-slate-200 hover:text-slate-700'}`}
+                  title="Adicionar carregamento"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                </button>
+              </div>
+
+              {/* Card list */}
+              <div className="p-2 flex flex-col gap-1.5">
+                {col.cards.map(card => (
+                  <div
+                    key={card.id}
+                    draggable={editingCardId !== card.id}
+                    onDragStart={(e) => editingCardId !== card.id && handleDragStart(e, col.id, card.id)}
+                    className={`rounded-lg border-l-[3px] border transition-all relative group ${
+                      card.released ? 'border-l-violet-500 border-violet-100 bg-violet-50/30' :
+                      card.loaded ? 'border-l-emerald-500 border-emerald-100 bg-emerald-50/30' :
+                      card.separated ? 'border-l-blue-400 border-blue-100 bg-blue-50/20' :
+                      'border-l-slate-300 border-slate-100 bg-white'
+                    } ${editingCardId !== card.id ? 'cursor-grab active:cursor-grabbing hover:shadow-sm' : 'cursor-default'}`}
+                  >
+                    {editingCardId === card.id ? (
+                      <div className="p-2 flex flex-col gap-1.5">
+                        <input autoFocus
+                          className="w-full text-[11px] font-bold text-blue-900 border border-blue-200 rounded-md px-2 py-1 outline-none bg-blue-50 focus:ring-1 focus:ring-blue-400 placeholder:font-normal placeholder:text-slate-300"
+                          placeholder="Transportador"
+                          value={card.carrier}
+                          onChange={e => updateCard(card.id, 'carrier', e.target.value)}
+                        />
+                        <input
+                          className="w-full text-[11px] text-slate-700 border border-slate-200 rounded-md px-2 py-1 outline-none bg-slate-50 placeholder:text-slate-300"
+                          placeholder="Cliente"
+                          value={card.client}
+                          onChange={e => updateCard(card.id, 'client', e.target.value)}
+                        />
+                        <input
+                          className="w-full text-[11px] text-slate-500 border border-slate-200 rounded-md px-2 py-1 outline-none bg-slate-50 placeholder:text-slate-300"
+                          placeholder="Volumetria (ex: 28 m³)"
+                          value={card.volumetry}
+                          onChange={e => updateCard(card.id, 'volumetry', e.target.value)}
+                        />
+                        <div className="flex flex-wrap gap-1">
+                          <BoolBtn label="Etiq." value={card.labeled} cardId={card.id} field="labeled" />
+                          <BoolBtn label="Pátio" value={card.in_yard} cardId={card.id} field="in_yard" />
+                          <BoolBtn label="Sep." value={card.separated} cardId={card.id} field="separated" />
+                          <BoolBtn label="Carr." value={card.loaded} cardId={card.id} field="loaded" />
+                          <BoolBtn label="Lib." value={card.released} cardId={card.id} field="released" />
+                        </div>
+                        <input
+                          className="w-full text-[10px] text-slate-400 border border-slate-100 rounded-md px-2 py-1 outline-none placeholder:text-slate-200"
+                          placeholder="Observações..."
+                          value={card.notes || ''}
+                          onChange={e => updateCard(card.id, 'notes', e.target.value)}
+                        />
+                        <div className="flex items-center justify-between pt-0.5">
+                          <button onClick={() => deleteCard(card.id, col.id)} className="text-[10px] text-red-400 hover:text-red-600 font-bold flex items-center gap-0.5">
+                            <Trash2 className="w-2.5 h-2.5" /> excluir
+                          </button>
+                          <button onClick={() => setEditingCardId(null)} className="text-[10px] font-bold text-blue-600 flex items-center gap-0.5">
+                            <CheckCircle2 className="w-2.5 h-2.5" /> ok
+                          </button>
+                        </div>
+                        {saving === card.id && <p className="text-[9px] text-slate-300 animate-pulse">salvando...</p>}
+                      </div>
+                    ) : (
+                      <div className="px-2.5 pt-1.5 pb-2">
+                        <div className="flex items-start justify-between gap-1">
+                          <p className="text-[11px] font-bold text-slate-800 leading-tight truncate flex-1">
+                            {card.carrier || <span className="text-slate-300 font-normal italic">Transportador</span>}
+                          </p>
+                          <button
+                            onClick={() => setEditingCardId(card.id)}
+                            className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 text-slate-300 hover:text-blue-500 shrink-0"
+                          >
+                            <Pencil className="w-2.5 h-2.5" />
+                          </button>
+                        </div>
+                        {card.client && <p className="text-[10px] text-slate-400 truncate">{card.client}</p>}
+                        {card.volumetry && <p className="text-[10px] font-bold text-blue-500 mt-0.5">{card.volumetry}</p>}
+                        <div className="flex flex-wrap gap-0.5 mt-1.5">
+                          {[
+                            { l: 'Etiq', v: card.labeled },
+                            { l: 'Pátio', v: card.in_yard },
+                            { l: 'Sep', v: card.separated },
+                            { l: 'Carr', v: card.loaded },
+                            { l: 'Lib', v: card.released },
+                          ].map(({ l, v }) => (
+                            <span key={l} className={`text-[8px] font-bold px-1 py-0.5 rounded ${v ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-300'}`}>{l}</span>
+                          ))}
+                        </div>
+                        {card.notes && <p className="text-[9px] text-slate-400 italic mt-1 truncate">{card.notes}</p>}
+                      </div>
+                    )}
+                  </div>
+                ))}
+
+                <button
+                  onClick={() => addCard(col)}
+                  className="w-full flex items-center justify-center gap-1 py-1.5 rounded-lg border border-dashed border-slate-200 hover:border-blue-300 hover:bg-blue-50 text-[10px] text-slate-300 hover:text-blue-500 transition-all"
+                >
+                  <Plus className="w-3 h-3" /> adicionar
+                </button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
 
 const Dashboard = ({ shipments, onSelectShipment, onCreateNew, onBack }: {
   shipments: Shipment[];
@@ -3696,6 +4098,7 @@ export default function App() {
 
   const modules = [
     { id: 'pam', title: 'Pam AI', desc: 'Assistente Inteligente', icon: Sparkles, color: 'bg-orange-50 text-orange-600', status: 'Active' },
+    { id: 'daily-schedule', title: 'Programação Diária', desc: 'Carregamento Kanban', icon: Calendar, color: 'bg-blue-50 text-blue-600', status: 'Active' },
     { id: 'dashboard', title: 'Shipments', desc: 'Operational overview', icon: Truck, color: 'bg-emerald-50 text-emerald-600', status: 'Active' },
     { id: 'routing', title: 'CargoFit / Routing', desc: 'Trailer occupation', icon: Route, color: 'bg-indigo-50 text-indigo-600', status: 'New' },
     { id: 'freight-calc', title: 'Freight Control', desc: 'Cost optimization', icon: Calculator, color: 'bg-amber-50 text-amber-600', status: 'Static', noClick: true },
@@ -3716,7 +4119,7 @@ export default function App() {
     setChatHistory([...chatHistory, { role: 'user', msg: chatMsg }, { role: 'ai', msg: 'Anotado. Estou analisando seus dados, mas como sou uma IA demonstrativa, ainda não efetuo alterações profundas na sua base.' }]);
     setChatMsg('');
   };
-  const [view, setView] = useState<'home' | 'dashboard' | 'freight-calc' | 'cargo-fit' | 'fork-manager' | 'payments' | 'docs' | 'routing' | 'fleet' | 'settings'>('home');
+  const [view, setView] = useState<'home' | 'dashboard' | 'daily-schedule' | 'freight-calc' | 'cargo-fit' | 'fork-manager' | 'payments' | 'docs' | 'routing' | 'fleet' | 'settings'>('home');
   const [activeTab, setActiveTab] = useState('home');
   const [shipments, setShipments] = useState<Shipment[]>([]);
   const [loading, setLoading] = useState(true);
@@ -3988,7 +4391,7 @@ export default function App() {
                   onClick={() => {
                     if (!locked && !m.noClick) {
                       setView(m.id as any);
-                      if (['dashboard', 'shipments', 'payments', 'reports', 'settings', 'fleet', 'routing', 'docs', 'fork-manager'].includes(m.id)) {
+                      if (['dashboard', 'shipments', 'payments', 'reports', 'settings', 'fleet', 'routing', 'docs', 'fork-manager', 'daily-schedule'].includes(m.id)) {
                         setActiveTab(m.id === 'shipments' ? 'dashboard' : m.id);
                       } else {
                         setActiveTab('home');
@@ -4106,6 +4509,12 @@ export default function App() {
           {view === 'pam' && (
             <motion.div key="pam" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
               <PamModule onBack={() => setView('home')} profile={profile} />
+            </motion.div>
+          )}
+
+          {view === 'daily-schedule' && (
+            <motion.div key="daily-schedule" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="h-full">
+              <DailySchedulePanel onBack={() => setView('home')} profile={profile} />
             </motion.div>
           )}
 
