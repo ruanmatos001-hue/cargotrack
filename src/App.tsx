@@ -5,6 +5,7 @@
 
 import React, { useState, useMemo, useEffect } from 'react';
 import { supabase } from './lib/supabase';
+import LandingPage from './LandingPage';
 import {
   LayoutDashboard,
   Package,
@@ -3974,7 +3975,7 @@ const DocsPanel = ({ onBack, profile }: { onBack: () => void, profile: Profile |
 };
 
 
-const Login = ({ onLogin }: { onLogin: (session: any) => void }) => {
+const Login = ({ onLogin, onBack }: { onLogin: (session: any) => void, onBack?: () => void }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -4015,9 +4016,13 @@ const Login = ({ onLogin }: { onLogin: (session: any) => void }) => {
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
-        className="w-full max-w-md bg-white/5 backdrop-blur-xl border border-white/10 rounded-3xl p-8 shadow-2xl relative z-10"
-      >
-        <div className="flex flex-col items-center mb-10">
+        className="w-full max-w-md bg-white/5 backdrop-blur-xl border border-white/10 rounded-3xl p-8 shadow-2xl relative z-10">
+        {onBack && (
+          <button onClick={onBack} type="button" className="absolute top-6 left-6 text-slate-400 hover:text-white flex items-center gap-2 text-[10px] uppercase font-bold tracking-widest transition-colors z-20">
+            &larr; Voltar
+          </button>
+        )}
+        <div className="flex flex-col items-center mb-10 mt-2">
           <div className="bg-blue-600 p-4 rounded-2xl shadow-xl shadow-blue-900/40 mb-4">
             <Package className="w-10 h-10 text-white" />
           </div>
@@ -4087,6 +4092,7 @@ const Login = ({ onLogin }: { onLogin: (session: any) => void }) => {
 
 export default function App() {
   const [session, setSession] = useState<any>(null);
+  const [authView, setAuthView] = useState<'landing' | 'login'>('landing');
   const [profile, setProfile] = useState<Profile | null>(null);
   const [permissions, setPermissions] = useState<ModuleAccess[]>([]);
   const [isMenuExpanded, setIsMenuExpanded] = useState(false);
@@ -4352,7 +4358,10 @@ export default function App() {
   };
 
   if (!session) {
-    return <Login onLogin={setSession} />;
+    if (authView === 'landing') {
+      return <LandingPage onLoginClick={() => setAuthView('login')} />;
+    }
+    return <Login onLogin={setSession} onBack={() => setAuthView('landing')} />;
   }
 
   if (!profile) {
